@@ -1,0 +1,13 @@
+{
+  "app": {
+    "title": "KOReader Sync Board"
+  },
+  "version": {
+    "label": "Version {{version}} (commit {{commit}})",
+    "loading": "Loading…",
+    "loadError": "Failed to fetch server version"
+  },
+  "language": {
+    "label": "Language"
+  }
+}

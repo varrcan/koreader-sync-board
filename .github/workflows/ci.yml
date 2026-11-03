@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go (lint, test, build without web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Generated code is up to date
+        run: |
+          go -C server generate ./...
+          git diff --exit-code -- server
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.15.0
+          working-directory: server
+      - name: Test
+        # -short пропускает разреженный файл > 1 GiB; эталон golden.json закоммичен, LuaJIT не нужен.
+        run: go -C server test -short -race ./...
+      - name: Build without webdist tag (clean clone, placeholder page)
+        env:
+          CGO_ENABLED: "0"
+        run: go -C server build -trimpath -o ../bin/ksb ./cmd/ksb
+
+  web:
+    name: Web (typecheck, lint, build) and Go build with webdist
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generated client is up to date
+        run: |
+          pnpm generate
+          git diff --exit-code -- packages
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm -F web build
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: server/go.sum
+      - name: Build with webdist tag
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go -C server build -trimpath -tags webdist -o ../bin/ksb ./cmd/ksb
+          go -C server test -tags webdist ./internal/web/ ./internal/server/
+
+  docker:
+    name: Docker image (amd64, arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false

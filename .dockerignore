@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+server/internal/web/dist
+bin
+.git
+.github
+.idea
+.local
+.claude
+.codex
+openspec
+CLAUDE.md
+data

@@ -1,0 +1,31 @@
+{
+  "name": "web",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@ksb/api-client": "workspace:*",
+    "@ksb/i18n": "workspace:*",
+    "@tanstack/react-query": "5.105.0",
+    "@tanstack/react-router": "1.170.46",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-i18next": "17.1.9"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "typescript": "6.0.3",
+    "vite": "8.3.5"
+  }
+}

@@ -1,0 +1,8 @@
+packages:
+  - apps/*
+  - packages/*
+
+# openapi-typescript 7.x объявляет peer typescript ^5, но генерация работает и с 6.x.
+peerDependencyRules:
+  allowedVersions:
+    openapi-typescript>typescript: "6"

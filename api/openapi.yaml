@@ -1,0 +1,78 @@
+openapi: 3.0.3
+info:
+  title: koreader-sync-board panel API
+  version: 0.1.0
+  description: |
+    API веб-панели. Ошибки возвращаются машинно-читаемым кодом, текст для
+    пользователя переводит клиент. Протокол синхронизации KOReader (kosync)
+    обслуживается в корне URL и здесь не описан.
+  license:
+    name: AGPL-3.0-only
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+paths:
+  /api/v1/health:
+    get:
+      operationId: getHealth
+      summary: Проверка работоспособности
+      description: Без авторизации и без требований к заголовкам; для оркестраторов и `ksb healthcheck`.
+      tags: [system]
+      responses:
+        "200":
+          description: Сервер работает
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Health"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/version:
+    get:
+      operationId: getVersion
+      summary: Версия сборки
+      tags: [system]
+      responses:
+        "200":
+          description: Версия и коммит, заданные при сборке
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Version"
+        default:
+          $ref: "#/components/responses/Error"
+components:
+  responses:
+    Error:
+      description: Ошибка
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    Version:
+      type: object
+      required: [version, commit]
+      properties:
+        version:
+          type: string
+          example: v0.1.0
+        commit:
+          type: string
+          example: 1a2b3c4
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Машинно-читаемый код ошибки, например `not_found`.
+          example: not_found
+        message:
+          type: string
+          description: Описание для разработчика; пользователю показывается перевод по `code`.

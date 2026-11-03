@@ -1,0 +1,78 @@
+# https://taskfile.dev
+version: "3"
+
+vars:
+  GOLANGCI_LINT: github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  COMMIT:
+    sh: git rev-parse --short HEAD 2>/dev/null || echo unknown
+  LDFLAGS: >-
+    -s -w
+    -X github.com/varrcan/koreader-sync-board/server/internal/buildinfo.Version={{.VERSION}}
+    -X github.com/varrcan/koreader-sync-board/server/internal/buildinfo.Commit={{.COMMIT}}
+
+tasks:
+  install:
+    desc: Установить JS-зависимости
+    cmds:
+      - pnpm install --frozen-lockfile
+
+  generate:
+    desc: Перегенерировать код из api/openapi.yaml (Go и TS)
+    cmds:
+      - go -C server generate ./...
+      - pnpm generate
+
+  web:build:
+    desc: Собрать веб-панель в server/internal/web/dist
+    cmds:
+      - pnpm -F web build
+
+  build:
+    desc: Собрать бинарник bin/ksb с вшитой веб-панелью
+    deps: [web:build]
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - go -C server build -trimpath -tags webdist -ldflags '{{.LDFLAGS}}' -o ../bin/ksb ./cmd/ksb
+
+  build:placeholder:
+    desc: Собрать бинарник без веба (страница-заглушка, Node не нужен)
+    env:
+      CGO_ENABLED: "0"
+    cmds:
+      - go -C server build -trimpath -ldflags '{{.LDFLAGS}}' -o ../bin/ksb ./cmd/ksb
+
+  test:
+    desc: "Тесты Go (один тест: go -C server test ./internal/kosync -run TestProgress)"
+    cmds:
+      - go -C server test -short ./...
+
+  test:full:
+    desc: Тесты Go, включая разреженный файл > 1 GiB
+    cmds:
+      - go -C server test ./...
+
+  lint:
+    desc: golangci-lint и eslint
+    cmds:
+      - go -C server run {{.GOLANGCI_LINT}} run ./...
+      - pnpm lint
+
+  typecheck:
+    desc: tsc --noEmit по всем TS-пакетам
+    cmds:
+      - pnpm typecheck
+
+  hashing:golden:
+    desc: Пересчитать эталон partial MD5 (нужен LuaJIT; LUAJIT=команда переопределяет)
+    vars:
+      LUAJIT: '{{.LUAJIT | default "luajit"}}'
+    cmds:
+      - go -C server run ./internal/hashing/internal/goldengen -luajit '{{.LUAJIT}}'
+
+  docker:
+    desc: Собрать образ ksb:dev
+    cmds:
+      - docker build --build-arg VERSION={{.VERSION}} --build-arg COMMIT={{.COMMIT}} -t ksb:dev .

@@ -1,0 +1,22 @@
+// Типизированный клиент API панели поверх openapi-fetch.
+// Типы берутся из src/schema.d.ts, сгенерированного по api/openapi.yaml.
+import createClient from "openapi-fetch";
+import type { components, paths } from "./schema";
+
+export type { components, paths };
+
+type Schemas = components["schemas"];
+
+export type Health = Schemas["Health"];
+export type Version = Schemas["Version"];
+export type ApiError = Schemas["Error"];
+
+export type ApiClient = ReturnType<typeof createApiClient>;
+
+/**
+ * Создаёт клиент API. По умолчанию запросы идут на тот же origin,
+ * откуда отдана панель (SPA вшита в Go-бинарник).
+ */
+export function createApiClient(baseUrl = "") {
+  return createClient<paths>({ baseUrl });
+}

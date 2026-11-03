@@ -1,0 +1,26 @@
+{
+  "name": "@ksb/i18n",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "i18next": "26.5.11",
+    "react-i18next": "17.1.9"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "react": "19.3.1",
+    "typescript": "6.0.3"
+  }
+}

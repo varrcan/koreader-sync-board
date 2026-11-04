@@ -25,6 +25,30 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for MeRole.
+const (
+	Admin MeRole = "admin"
+	User  MeRole = "user"
+)
+
+// Valid indicates whether the value is a known member of the MeRole enum.
+func (e MeRole) Valid() bool {
+	switch e {
+	case Admin:
+		return true
+	case User:
+		return true
+	default:
+		return false
+	}
+}
+
+// ChangePasswordRequest defines model for ChangePasswordRequest.
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
 // Error defines model for Error.
 type Error struct {
 	// Code Машинно-читаемый код ошибки, например `not_found`.
@@ -44,6 +68,36 @@ type Health struct {
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
 
+// LoginRequest defines model for LoginRequest.
+type LoginRequest struct {
+	Password string `json:"password"`
+	Username string `json:"username"`
+}
+
+// Me defines model for Me.
+type Me struct {
+	Role     MeRole `json:"role"`
+	Username string `json:"username"`
+}
+
+// MeRole defines model for Me.Role.
+type MeRole string
+
+// SetupRequest defines model for SetupRequest.
+type SetupRequest struct {
+	// Code Код из лога сервера; регистр, пробелы по краям и дефисы не важны.
+	//
+	// Example: abcd-efgh-ijkl
+	Code     string `json:"code"`
+	Password string `json:"password"`
+	Username string `json:"username"`
+}
+
+// SetupStatus defines model for SetupStatus.
+type SetupStatus struct {
+	Required bool `json:"required"`
+}
+
 // Version defines model for Version.
 type Version struct {
 	// Commit Example: 1a2b3c4
@@ -53,11 +107,47 @@ type Version struct {
 	Version string `json:"version"`
 }
 
+// CrossOrigin defines model for CrossOrigin.
+type CrossOrigin = Error
+
+// TooManyAttempts defines model for TooManyAttempts.
+type TooManyAttempts = Error
+
+// Unauthorized defines model for Unauthorized.
+type Unauthorized = Error
+
+// LoginJSONRequestBody defines body for Login for application/json ContentType.
+type LoginJSONRequestBody = LoginRequest
+
+// ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
+type ChangePasswordJSONRequestBody = ChangePasswordRequest
+
+// CompleteSetupJSONRequestBody defines body for CompleteSetup for application/json ContentType.
+type CompleteSetupJSONRequestBody = SetupRequest
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// Login Вход в панель
+	// (POST /api/v1/auth/login)
+	Login(w http.ResponseWriter, r *http.Request)
+	// Logout Выход
+	// (POST /api/v1/auth/logout)
+	Logout(w http.ResponseWriter, r *http.Request)
 	// GetHealth Проверка работоспособности
 	// (GET /api/v1/health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// GetMe Текущий пользователь
+	// (GET /api/v1/me)
+	GetMe(w http.ResponseWriter, r *http.Request)
+	// ChangePassword Смена своего пароля панели
+	// (PUT /api/v1/me/password)
+	ChangePassword(w http.ResponseWriter, r *http.Request)
+	// GetSetup Нужен ли мастер первого запуска
+	// (GET /api/v1/setup)
+	GetSetup(w http.ResponseWriter, r *http.Request)
+	// CompleteSetup Создать первого администратора
+	// (POST /api/v1/setup)
+	CompleteSetup(w http.ResponseWriter, r *http.Request)
 	// GetVersion Версия сборки
 	// (GET /api/v1/version)
 	GetVersion(w http.ResponseWriter, r *http.Request)
@@ -72,11 +162,95 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.Handler) http.Handler
 
+// Login operation middleware
+func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Login(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Logout operation middleware
+func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetHealth operation middleware
 func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetMe operation middleware
+func (siw *ServerInterfaceWrapper) GetMe(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChangePassword operation middleware
+func (siw *ServerInterfaceWrapper) ChangePassword(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangePassword(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSetup operation middleware
+func (siw *ServerInterfaceWrapper) GetSetup(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSetup(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CompleteSetup operation middleware
+func (siw *ServerInterfaceWrapper) CompleteSetup(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CompleteSetup(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -222,6 +396,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/health", wrapper.GetHealth)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/version", wrapper.GetVersion)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/auth/login", wrapper.Login)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/auth/logout", wrapper.Logout)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/me", wrapper.GetMe)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/me/password", wrapper.ChangePassword)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/setup", wrapper.GetSetup)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/setup", wrapper.CompleteSetup)
 
 	return m
 }

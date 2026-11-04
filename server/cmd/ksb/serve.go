@@ -17,6 +17,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/clientip"
 	"github.com/varrcan/koreader-sync-board/server/internal/config"
 	"github.com/varrcan/koreader-sync-board/server/internal/kosync"
+	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
 	"github.com/varrcan/koreader-sync-board/server/internal/server"
@@ -38,7 +39,10 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	}
 	defer db.Close()
 
-	acc := accounts.New(db, accounts.WithLimiter(ratelimit.New(log)))
+	// Один ограничитель на kosync и панель: подбор пароля панели и ключа kosync
+	// с одного адреса расходует общий бюджет.
+	limiter := ratelimit.New(log)
+	acc := accounts.New(db, accounts.WithLimiter(limiter))
 	created, err := acc.Bootstrap(ctx, cfg.AdminUser, cfg.AdminPassword)
 	if err != nil {
 		return fmt.Errorf("bootstrap admin: %w", err)
@@ -46,14 +50,28 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	if created {
 		log.Info("created admin user from ADMIN_USER", "user", cfg.AdminUser)
 	}
+	setup := panelauth.NewSetup(acc, limiter)
+	users, err := acc.CountUsers(ctx)
+	if err != nil {
+		return err
+	}
+	if users == 0 {
+		log.Warn("setup required", "setup_code", setup.Generate(), "url", "/setup")
+	}
 
+	ip := clientip.New(cfg.TrustedProxies)
 	handler := server.New(server.Handlers{
 		Kosync: kosync.New(acc, progress.New(db), kosync.Options{
 			Registration: cfg.KosyncRegistration,
 			SelfDelete:   cfg.KosyncSelfDelete,
-			ClientIP:     clientip.New(cfg.TrustedProxies),
+			ClientIP:     ip,
 		}, log),
-		API: apiv1.NewHandler(),
+		API: apiv1.NewHandler(&apiv1.Server{
+			Accounts: acc,
+			Auth:     panelauth.New(acc, ip, log),
+			Setup:    setup,
+			Log:      log,
+		}),
 		Web: web.Handler(),
 	})
 	srv := &http.Server{

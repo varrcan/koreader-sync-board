@@ -347,7 +347,7 @@ func TestLastUsedAtPerMinute(t *testing.T) {
 
 func TestBootstrap(t *testing.T) {
 	e := newEnv(t)
-	created, err := e.svc.Bootstrap(e.ctx, "admin", "secret")
+	created, err := e.svc.Bootstrap(e.ctx, "admin", "secret-pass")
 	if err != nil || !created {
 		t.Fatalf("created=%v err=%v", created, err)
 	}
@@ -356,7 +356,7 @@ func TestBootstrap(t *testing.T) {
 		t.Fatalf("users = %+v", users)
 	}
 	// Пароль панели не работает в kosync: устройств нет.
-	if _, err := e.svc.Authenticate(e.ctx, "admin", md5hex("secret"), client); !errors.Is(err, ErrUnauthorized) {
+	if _, err := e.svc.Authenticate(e.ctx, "admin", md5hex("secret-pass"), client); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("panel password accepted by kosync: %v", err)
 	}
 	var hash1 string
@@ -366,7 +366,7 @@ func TestBootstrap(t *testing.T) {
 
 	created, err = e.svc.Bootstrap(e.ctx, "admin", "other")
 	if err != nil || created {
-		t.Fatalf("second bootstrap created=%v err=%v", created, err)
+		t.Fatalf("second bootstrap with a short password created=%v err=%v", created, err)
 	}
 	created, err = e.svc.Bootstrap(e.ctx, "admin2", "other")
 	if err != nil || created {
@@ -381,13 +381,19 @@ func TestBootstrap(t *testing.T) {
 	}
 }
 
-func TestBootstrapNeedsBothVars(t *testing.T) {
+func TestBootstrapValidation(t *testing.T) {
 	e := newEnv(t)
-	for _, c := range [][2]string{{"", ""}, {"admin", ""}, {"", "secret"}} {
-		created, err := e.svc.Bootstrap(e.ctx, c[0], c[1])
-		if err != nil || created {
-			t.Fatalf("%v: created=%v err=%v", c, created, err)
-		}
+	if created, err := e.svc.Bootstrap(e.ctx, "", ""); err != nil || created {
+		t.Fatalf("no vars: created=%v err=%v", created, err)
+	}
+	if _, err := e.svc.Bootstrap(e.ctx, "admin", "short"); !errors.Is(err, ErrInvalidPassword) {
+		t.Fatalf("short ADMIN_PASSWORD: %v", err)
+	}
+	if _, err := e.svc.Bootstrap(e.ctx, "a:b", "long enough"); !errors.Is(err, ErrInvalidUsername) {
+		t.Fatalf("bad ADMIN_USER: %v", err)
+	}
+	if n, _ := e.svc.CountUsers(e.ctx); n != 0 {
+		t.Fatalf("users created on invalid input: %d", n)
 	}
 }
 
@@ -617,7 +623,7 @@ func TestDevicePasswordFormat(t *testing.T) {
 	re := regexp.MustCompile(`^[a-z2-7]{4}-[a-z2-7]{4}$`)
 	seen := map[string]bool{}
 	for range 100 {
-		p := newDevicePassword()
+		p := GeneratePassword(2)
 		if !re.MatchString(p) {
 			t.Fatalf("password %q", p)
 		}

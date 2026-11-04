@@ -10,8 +10,8 @@ A lightweight self-hosted server for the **standard** KOReader — no plugins on
   on its own.
 - One static binary (linux/amd64, linux/arm64), SQLite, no Node at runtime.
 
-Reading statistics, the web panel and the library are in development: the current build
-ships a placeholder page.
+Reading statistics, the web panel and the library are in development: for now the panel
+has sign-in, the first-run setup and password change.
 
 ## Run with Docker
 
@@ -34,6 +34,38 @@ docker run -d --name ksb -v "$PWD/data:/data" -p 8080:8080 koreader-sync-board
 
 The image has a built-in health check (`ksb healthcheck`, which requests `/api/v1/health`).
 
+## First run and signing in to the panel
+
+Open `http://<host>:8080`. On a fresh server with no users the panel shows the **setup
+wizard**: it asks for a one-time setup code that the server writes to its log on startup.
+Find it with
+
+```sh
+docker logs ksb 2>&1 | grep setup_code          # Docker
+journalctl -u ksb | grep setup_code             # binary under systemd (ksb.service)
+```
+
+Enter the code (case, spaces and dashes do not matter), choose a username and a panel
+password of 8 to 256 characters: this creates the administrator and signs you in. The code
+lives only in memory, so after a restart look for the newest line. To skip the wizard, set
+`ADMIN_USER` and `ADMIN_PASSWORD` (both, or neither) before the first start.
+
+The **panel password** is separate from device passwords: a device password does not open
+the panel, and the panel password does not work in KOReader. Users created with
+`ksb user add` (and users from earlier versions) have no panel password yet; issue one with
+
+```sh
+docker exec ksb /ksb user passwd alice
+```
+
+It prints a generated password `xxxx-xxxx-xxxx-xxxx` **once** and signs the user out of
+all panel sessions; device passwords stay as they are. After signing in, the password can be
+changed in the panel, which signs out the user's other sessions.
+
+A panel session lasts 30 days from the last use. The session cookie gets the `Secure` flag
+when the panel is opened over HTTPS (directly or through a proxy that sends
+`X-Forwarded-Proto: https`); over plain `http://` in a local network it works without it.
+
 ## Create a user and a device
 
 Users and devices are managed with the `ksb` CLI. It works on the same database while the
@@ -51,7 +83,7 @@ cannot be shown again. Passwords issued by earlier versions in a longer format k
 ```sh
 docker exec ksb /ksb device list alice           # names, creation and last use, revoked flag
 docker exec ksb /ksb device revoke alice "Kindle"
-docker exec ksb /ksb user disable alice          # blocks all of alice's devices
+docker exec ksb /ksb user disable alice          # blocks all of alice's devices and panel sessions
 docker exec ksb /ksb user delete alice           # removes devices and reading progress
 ```
 
@@ -77,14 +109,15 @@ Both document matching methods (*Binary* and *Filename*) are supported.
 | `KSB_KOSYNC_REGISTRATION` | `false` | Allow creating accounts from KOReader (`POST /users/create`) |
 | `KSB_KOSYNC_SELF_DELETE` | `false` | Allow deleting an account from the device (`DELETE /users/me`) |
 | `KSB_TRUSTED_PROXIES` | — | Reverse proxies whose `X-Forwarded-For` is trusted: CIDRs or single addresses, comma-separated (see below) |
-| `ADMIN_USER`, `ADMIN_PASSWORD` | — | Create an admin with a panel password on first start (empty database only) |
+| `ADMIN_USER`, `ADMIN_PASSWORD` | — | Create an admin with a panel password on first start (empty database only). Set both or neither; the password needs at least 8 characters |
 
 `serve` also accepts `-listen` and `-data-dir`, which override the environment.
 
 ## Failed logins
 
 After **10 failed logins within 10 minutes** from one client address, that address is
-blocked for **15 minutes**. IPv6 clients are counted per `/64` network. Counters live in
+blocked for **15 minutes**. KOReader logins, panel sign-ins (a wrong password, including the
+current password when changing it) and wrong setup codes share this budget. IPv6 clients are counted per `/64` network. Counters live in
 memory and reset on restart.
 
 - KOReader shows the reason: *"Too many failed attempts. Try again in N minutes."*
@@ -97,6 +130,8 @@ memory and reset on restart.
   lock out the other e-readers in the same home network.
 - With registration enabled, every `POST /users/create` counts as an attempt, successful
   ones too.
+- The panel answers a blocked address with `429 Too Many Requests` and `Retry-After`.
+  Unlike KOReader, a repeated wrong panel password counts every time.
 
 ## Behind a reverse proxy
 
@@ -115,7 +150,13 @@ must append the client address, as nginx does with
 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (nginx proxy manager does
 this by default).
 
-Getting this wrong has consequences either way:
+The proxy must also pass the original `Host` header (nginx: `proxy_set_header Host $host;`;
+nginx proxy manager, Caddy and Traefik do this by default). The panel rejects sign-in and
+other changes from a foreign site; over plain `http://` browsers do not send
+`Sec-Fetch-Site`, so the server compares `Origin` with `Host`, and a rewritten `Host` makes
+every sign-in fail with `cross_origin`.
+
+Getting `KSB_TRUSTED_PROXIES` wrong has consequences either way:
 
 - **not set** behind a proxy: all clients share the proxy's address, so one attacker blocks
   logins for everyone whose device has not logged in recently, and the log shows only the
@@ -129,6 +170,7 @@ Every failed login is logged as one JSON line with the client address:
 
 ```json
 {"time":"2026-11-04T21:47:10.84+03:00","level":"WARN","msg":"kosync: authorization failed","user":"alice","ip":"198.51.100.7","path":"/users/auth","reason":"unauthorized"}
+{"time":"2026-11-04T21:48:02.11+03:00","level":"WARN","msg":"panel: authorization failed","user":"alice","ip":"198.51.100.7","path":"/api/v1/auth/login","reason":"unauthorized"}
 ```
 
 Repeats of an already rejected password and requests refused because of a block are not
@@ -137,7 +179,7 @@ logged. To ban persistent offenders for longer, create `/etc/fail2ban/filter.d/k
 ```ini
 [Definition]
 # Matches the plain JSON line and Docker's json-file log, where quotes are escaped.
-failregex = \\?"msg\\?":\\?"kosync: authorization failed\\?".*\\?"ip\\?":\\?"<HOST>\\?",\\?"path\\?"
+failregex = \\?"msg\\?":\\?"(?:kosync|panel): authorization failed\\?".*\\?"ip\\?":\\?"<HOST>\\?",\\?"path\\?"
 datepattern = "time\\?":\\?"%%Y-%%m-%%dT%%H:%%M:%%S(?:\.\d+)?%%z
 ```
 

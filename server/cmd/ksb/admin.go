@@ -69,6 +69,21 @@ func userCmd(ctx context.Context, cfg config.Config, args []string, out io.Write
 			fmt.Fprintf(out, "user %q disabled\n", name)
 			return nil
 		})
+	case "passwd":
+		name, err := oneArg(flag.NewFlagSet("user passwd", flag.ContinueOnError), args, "user passwd <name>")
+		if err != nil {
+			return err
+		}
+		return withAccounts(ctx, cfg, func(s *accounts.Service) error {
+			pass := accounts.GeneratePassword(4)
+			if err := s.SetPanelPassword(ctx, name, pass, 0); err != nil {
+				return fmt.Errorf("user %q: %w", name, err)
+			}
+			fmt.Fprintf(out, "panel password for %q set, all panel sessions closed\n\n  username: %s\n  password: %s\n\n"+
+				"The password is shown only once. Change it in the panel after logging in.\n",
+				name, name, pass)
+			return nil
+		})
 	case "delete":
 		name, err := oneArg(flag.NewFlagSet("user delete", flag.ContinueOnError), args, "user delete <name>")
 		if err != nil {

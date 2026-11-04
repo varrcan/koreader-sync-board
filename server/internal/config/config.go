@@ -56,6 +56,14 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	c.AdminUser = getenv("ADMIN_USER")
 	c.AdminPassword = getenv("ADMIN_PASSWORD")
+	// Одна заданная переменная — почти наверняка опечатка в имени другой. Молча
+	// пропустить bootstrap значило бы открыть мастер первого запуска.
+	switch {
+	case c.AdminUser != "" && c.AdminPassword == "":
+		return Config{}, fmt.Errorf("ADMIN_USER is set but ADMIN_PASSWORD is not: set both or neither")
+	case c.AdminUser == "" && c.AdminPassword != "":
+		return Config{}, fmt.Errorf("ADMIN_PASSWORD is set but ADMIN_USER is not: set both or neither")
+	}
 	return c, nil
 }
 

@@ -2,9 +2,16 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
+	"net/netip"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
+	"github.com/varrcan/koreader-sync-board/server/internal/store"
 )
 
 func TestHealthURL(t *testing.T) {
@@ -58,5 +65,58 @@ func TestCLI(t *testing.T) {
 	}
 	if _, code := ksb("bogus"); code != 2 {
 		t.Fatal("unknown command should exit 2")
+	}
+}
+
+func TestUserPasswd(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KSB_DATA_DIR", dir)
+	ksb := func(args ...string) (string, int) {
+		var out, errb bytes.Buffer
+		code := run(args, &out, &errb)
+		return out.String() + errb.String(), code
+	}
+	if out, code := ksb("user", "add", "alice"); code != 0 {
+		t.Fatal(out)
+	}
+	out, code := ksb("device", "add", "alice", "Kindle")
+	device := regexp.MustCompile(`(?m)^  password: (\S+)$`).FindStringSubmatch(out)
+	if code != 0 || device == nil {
+		t.Fatalf("device add: %s", out)
+	}
+
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(dir, store.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	acc := accounts.New(db)
+	var id int64
+	if err := db.Read.QueryRow(`SELECT id FROM users WHERE username = 'alice'`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	token, _, err := acc.CreateSession(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, code = ksb("user", "passwd", "alice")
+	m := regexp.MustCompile(`(?m)^  password: ([a-z2-7]{4}(?:-[a-z2-7]{4}){3})$`).FindStringSubmatch(out)
+	if code != 0 || m == nil {
+		t.Fatalf("user passwd: %d %s", code, out)
+	}
+	client := netip.MustParseAddr("192.0.2.1")
+	if _, err := acc.VerifyPanelPassword(ctx, "alice", m[1], client); err != nil {
+		t.Fatalf("login with new password: %v", err)
+	}
+	if _, _, err := acc.SessionByToken(ctx, token); !errors.Is(err, accounts.ErrUnauthorized) {
+		t.Fatalf("session survived passwd: %v", err)
+	}
+	if _, err := acc.Authenticate(ctx, "alice", accounts.KeyFromPassword(device[1]), client); err != nil {
+		t.Fatalf("device key changed: %v", err)
+	}
+	if out, code := ksb("user", "passwd", "ghost"); code != 1 || !strings.Contains(out, "not found") {
+		t.Fatalf("unknown user: %d %s", code, out)
 	}
 }

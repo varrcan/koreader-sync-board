@@ -4,12 +4,15 @@ import createClient from "openapi-fetch";
 import type { components, paths } from "./schema";
 
 export type { components, paths };
+export type { Middleware } from "openapi-fetch";
 
 type Schemas = components["schemas"];
 
 export type Health = Schemas["Health"];
 export type Version = Schemas["Version"];
 export type ApiError = Schemas["Error"];
+export type Me = Schemas["Me"];
+export type SetupStatus = Schemas["SetupStatus"];
 
 export type ApiClient = ReturnType<typeof createApiClient>;
 

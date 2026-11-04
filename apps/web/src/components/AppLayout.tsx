@@ -1,0 +1,108 @@
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link, Outlet, useRouter } from "@tanstack/react-router";
+import { House, KeyRound, LogOut } from "lucide-react";
+import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { api } from "@/api";
+import { meQuery, signedOut } from "@/auth";
+import { Button } from "@/components/ui/button";
+import { LanguageSelect } from "./LanguageSelect";
+import { Logo } from "./Logo";
+
+function NavLink({ to, icon, children }: { to: "/" | "/password"; icon: ReactNode; children: ReactNode }) {
+  return (
+    <Link
+      to={to}
+      className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground [&_svg]:size-4.5"
+      activeProps={{ className: "bg-accent font-medium text-foreground" }}
+      activeOptions={{ exact: true }}
+    >
+      {icon}
+      {children}
+    </Link>
+  );
+}
+
+/** Каркас страниц после входа; сайдбар и блок пользователя — по HomeScreen. */
+export function AppLayout() {
+  const { t } = useTranslation();
+  const router = useRouter();
+  const { data: me } = useQuery(meQuery);
+
+  const logout = useMutation({
+    mutationFn: () => api.POST("/api/v1/auth/logout"),
+    onSettled: () => {
+      signedOut();
+      router.history.push("/login");
+    },
+  });
+
+  const user = me && (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-[13px] font-semibold uppercase">
+        {me.username.slice(0, 1)}
+      </div>
+      <div className="flex min-w-0 flex-col">
+        <span className="truncate text-[13px] font-medium">{me.username}</span>
+        <span className="text-xs text-muted-foreground">{t(`roles.${me.role}`)}</span>
+      </div>
+    </div>
+  );
+  const logoutButton = (
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      title={t("auth.logout")}
+      aria-label={t("auth.logout")}
+      disabled={logout.isPending}
+      onClick={() => logout.mutate()}
+    >
+      <LogOut />
+    </Button>
+  );
+
+  return (
+    <div className="flex min-h-svh">
+      <aside className="sticky top-0 hidden h-svh w-58 shrink-0 flex-col gap-7 border-r bg-sidebar px-3 py-5 md:flex">
+        <div className="px-2">
+          <Logo />
+        </div>
+        <nav className="flex flex-col gap-0.5">
+          <NavLink to="/" icon={<House />}>
+            {t("nav.home")}
+          </NavLink>
+          <NavLink to="/password" icon={<KeyRound />}>
+            {t("nav.password")}
+          </NavLink>
+        </nav>
+        <div className="mt-auto flex flex-col gap-3 border-t px-2 pt-4">
+          <div className="flex items-center justify-between gap-2">
+            {user}
+            {logoutButton}
+          </div>
+          <LanguageSelect className="self-start" />
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex items-center justify-between gap-3 border-b bg-sidebar px-4 py-3 md:hidden">
+          <Link to="/">
+            <Logo />
+          </Link>
+          <div className="flex items-center gap-1">
+            <LanguageSelect />
+            <Button variant="ghost" size="icon-sm" asChild title={t("nav.password")} aria-label={t("nav.password")}>
+              <Link to="/password">
+                <KeyRound />
+              </Link>
+            </Button>
+            {logoutButton}
+          </div>
+        </header>
+        <main className="flex flex-col gap-7 px-4 py-5 md:px-8 md:py-7">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}

@@ -6,6 +6,11 @@ info:
     API веб-панели. Ошибки возвращаются машинно-читаемым кодом, текст для
     пользователя переводит клиент. Протокол синхронизации KOReader (kosync)
     обслуживается в корне URL и здесь не описан.
+
+    Авторизация — cookie сессии `ksb_session` (`HttpOnly`, `SameSite=Lax`), которую
+    ставят вход и мастер настройки. Без сессии доступны только health, version,
+    вход, выход и мастер; остальные операции отвечают 401 `unauthorized`.
+    Изменяющие запросы из браузера с чужого origin отклоняются с 403 `cross_origin`.
   license:
     name: AGPL-3.0-only
     url: https://www.gnu.org/licenses/agpl-3.0.html
@@ -39,8 +44,199 @@ paths:
                 $ref: "#/components/schemas/Version"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      summary: Вход в панель
+      description: |
+        Проверяет пароль панели и открывает сессию. Неизвестное имя, неверный пароль,
+        отключённый пользователь и пользователь без пароля панели дают одинаковый
+        ответ. Неудачи расходуют бюджет ограничителя по адресу, общий с kosync.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Вход выполнен, cookie сессии выставлена
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "400":
+          $ref: "#/components/responses/Error"
+        "401":
+          description: "`invalid_credentials`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          $ref: "#/components/responses/CrossOrigin"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      summary: Выход
+      description: Удаляет текущую сессию и стирает cookie. Без сессии ничего не делает.
+      tags: [auth]
+      responses:
+        "204":
+          description: Сессии больше нет
+        "403":
+          $ref: "#/components/responses/CrossOrigin"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/me:
+    get:
+      operationId: getMe
+      summary: Текущий пользователь
+      tags: [auth]
+      responses:
+        "200":
+          description: Владелец сессии
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/me/password:
+    put:
+      operationId: changePassword
+      summary: Смена своего пароля панели
+      description: |
+        Меняет пароль при верном текущем и удаляет все остальные сессии пользователя;
+        текущая остаётся. Неверный текущий пароль расходует бюджет ограничителя.
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "204":
+          description: Пароль изменён
+        "400":
+          description: "`invalid_password` или `bad_request`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "`invalid_credentials` (неверный текущий пароль) или `cross_origin`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/setup:
+    get:
+      operationId: getSetup
+      summary: Нужен ли мастер первого запуска
+      tags: [setup]
+      responses:
+        "200":
+          description: "`required` истинно, пока пользователей нет и код настройки существует"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupStatus"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: completeSetup
+      summary: Создать первого администратора
+      description: |
+        По коду настройки из лога сервера создаёт администратора и открывает ему
+        сессию. Неверный код расходует бюджет ограничителя; ошибка имени или пароля
+        при верном коде — нет, и код остаётся действительным.
+      tags: [setup]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupRequest"
+      responses:
+        "200":
+          description: Администратор создан, cookie сессии выставлена
+          headers:
+            Set-Cookie:
+              $ref: "#/components/headers/SessionCookie"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "400":
+          description: "`invalid_username`, `invalid_password` или `bad_request`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: "`invalid_setup_code` или `cross_origin`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "`setup_completed`: пользователи уже есть"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/TooManyAttempts"
+        default:
+          $ref: "#/components/responses/Error"
 components:
+  headers:
+    SessionCookie:
+      description: "`ksb_session=…; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax` (`Secure` по HTTPS)"
+      schema:
+        type: string
   responses:
+    Unauthorized:
+      description: "`unauthorized`: нет действующей сессии"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    CrossOrigin:
+      description: "`cross_origin`: изменяющий запрос браузера с чужого origin"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooManyAttempts:
+      description: "`too_many_attempts`: адрес заблокирован за неудачные входы"
+      headers:
+        Retry-After:
+          description: Через сколько секунд повторить
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     Error:
       description: Ошибка
       content:
@@ -76,3 +272,54 @@ components:
         message:
           type: string
           description: Описание для разработчика; пользователю показывается перевод по `code`.
+    Me:
+      type: object
+      required: [username, role]
+      properties:
+        username:
+          type: string
+        role:
+          type: string
+          enum: [admin, user]
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password:
+          type: string
+          format: password
+        new_password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 256
+    SetupStatus:
+      type: object
+      required: [required]
+      properties:
+        required:
+          type: boolean
+    SetupRequest:
+      type: object
+      required: [code, username, password]
+      properties:
+        code:
+          type: string
+          description: Код из лога сервера; регистр, пробелы по краям и дефисы не важны.
+          example: abcd-efgh-ijkl
+        username:
+          type: string
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 256

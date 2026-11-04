@@ -46,6 +46,11 @@ var (
 	// ErrRateLimited — адрес клиента заблокирован за неудачные входы. Возвращается
 	// как *RateLimitedError и ErrUnauthorized не оборачивает.
 	ErrRateLimited = errors.New("too many failed attempts")
+	// ErrInvalidUsername и ErrInvalidPassword оборачивают ErrInvalid.
+	ErrInvalidUsername = fmt.Errorf("%w: username must be non-empty and must not contain ':'", ErrInvalid)
+	ErrInvalidPassword = fmt.Errorf("%w: password must be %d to %d characters", ErrInvalid, MinPanelPassword, MaxPanelPassword)
+	// ErrSetupCompleted — первый администратор уже есть.
+	ErrSetupCompleted = errors.New("setup already completed")
 	// ErrRepeated сопровождает ErrUnauthorized или ErrUnknownUser, когда тот же
 	// ключ уже был отвергнут недавно. Такие отказы не стоит логировать: их шлёт
 	// отозванная читалка, и fail2ban по логу забанил бы её домашнюю сеть.
@@ -69,6 +74,12 @@ type Role string
 const (
 	RoleAdmin Role = "admin"
 	RoleUser  Role = "user"
+)
+
+const (
+	// MinPanelPassword и MaxPanelPassword — допустимая длина пароля панели в символах.
+	MinPanelPassword = 8
+	MaxPanelPassword = 256
 )
 
 const (
@@ -204,7 +215,7 @@ func (s *Service) verify(secret, encoded string) bool {
 // CreateUser создаёт пользователя без устройств.
 func (s *Service) CreateUser(ctx context.Context, username string, role Role) (User, error) {
 	if !ValidUsername(username) {
-		return User{}, fmt.Errorf("%w: username must be non-empty and must not contain ':'", ErrInvalid)
+		return User{}, ErrInvalidUsername
 	}
 	if role != RoleAdmin && role != RoleUser {
 		return User{}, fmt.Errorf("%w: role must be admin or user", ErrInvalid)
@@ -316,7 +327,7 @@ func (s *Service) AddDevice(ctx context.Context, username, name string) (string,
 	if strings.TrimSpace(name) == "" {
 		return "", fmt.Errorf("%w: device name is empty", ErrInvalid)
 	}
-	password := newDevicePassword()
+	password := GeneratePassword(2)
 	keyHash, err := s.hash(KeyFromPassword(password))
 	if err != nil {
 		return "", err
@@ -343,12 +354,17 @@ func (s *Service) AddDevice(ctx context.Context, username, name string) (string,
 	return password, nil
 }
 
-// newDevicePassword — 8 символов base32 в нижнем регистре через дефис посередине
-// (40 бит): короткий пароль удобно набирать на экранной клавиатуре читалки, а
-// онлайн-подбор сдерживает ограничитель. В алфавите нет 0/1/8/9, путаницы с o/l нет.
-func newDevicePassword() string {
-	t := strings.ToLower(rand.Text())[:8]
-	return t[:4] + "-" + t[4:]
+// GeneratePassword возвращает groups групп по 4 символа base32 в нижнем регистре
+// через дефис, по 20 бит на группу (не больше 6 групп). Пароль устройства — две
+// группы: его набирают на экранной клавиатуре читалки, а онлайн-подбор сдерживает
+// ограничитель. В алфавите нет 0/1/8/9, путаницы с o/l нет.
+func GeneratePassword(groups int) string {
+	t := strings.ToLower(rand.Text())
+	parts := make([]string, groups)
+	for i := range parts {
+		parts[i] = t[4*i : 4*i+4]
+	}
+	return strings.Join(parts, "-")
 }
 
 // ListDevices возвращает устройства пользователя, включая отозванные.
@@ -590,36 +606,26 @@ func (s *Service) RotateKey(ctx context.Context, p Principal, newKey string) err
 	return nil
 }
 
-// Bootstrap создаёт администратора с паролем панели, если пользователей ещё нет
-// и заданы оба значения. Устройств у него нет: пароль панели в kosync не работает.
+// Bootstrap создаёт администратора из ADMIN_USER/ADMIN_PASSWORD, если пользователей
+// ещё нет. Пустые оба значения — ничего не делать; задать только одно запрещает config.
+// Устройств у администратора нет: пароль панели в kosync не работает.
 func (s *Service) Bootstrap(ctx context.Context, username, password string) (bool, error) {
-	if username == "" || password == "" {
+	if username == "" && password == "" {
 		return false, nil
 	}
-	if !ValidUsername(username) {
-		return false, fmt.Errorf("%w: ADMIN_USER must not contain ':'", ErrInvalid)
-	}
-	var n int
-	if err := s.db.Read.QueryRowContext(ctx, `SELECT count(*) FROM users`).Scan(&n); err != nil {
+	if n, err := s.CountUsers(ctx); err != nil || n > 0 {
 		return false, err
 	}
-	if n > 0 {
+	_, err := s.CreateFirstAdmin(ctx, username, password)
+	switch {
+	case errors.Is(err, ErrSetupCompleted):
 		return false, nil
+	case errors.Is(err, ErrInvalidUsername):
+		return false, fmt.Errorf("ADMIN_USER: %w", err)
+	case errors.Is(err, ErrInvalidPassword):
+		return false, fmt.Errorf("ADMIN_PASSWORD: %w", err)
 	}
-	hash, err := s.hash(password)
-	if err != nil {
-		return false, err
-	}
-	// Проверка ещё раз внутри вставки: CLI мог создать пользователя за это время.
-	res, err := s.db.Write.ExecContext(ctx, `
-		INSERT INTO users (username, role, panel_password_hash, created_at)
-		SELECT ?, 'admin', ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)`,
-		username, hash, s.now().Unix())
-	if err != nil {
-		return false, err
-	}
-	created, _ := res.RowsAffected()
-	return created == 1, nil
+	return err == nil, err
 }
 
 func cacheKey(userID int64, key string) [32]byte {

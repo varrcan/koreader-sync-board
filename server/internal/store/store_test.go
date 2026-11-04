@@ -16,7 +16,7 @@ func TestOpenCreatesSchema(t *testing.T) {
 	}
 	defer db.Close()
 
-	for _, table := range []string{"users", "device_credentials", "documents", "progress_events", "progress_current"} {
+	for _, table := range []string{"users", "device_credentials", "documents", "progress_events", "progress_current", "sessions"} {
 		var n int
 		if err := db.Read.QueryRowContext(ctx,
 			`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil {
@@ -64,8 +64,12 @@ func TestMigrateTwice(t *testing.T) {
 	if err := db.Read.QueryRowContext(ctx, `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Fatalf("schema_migrations rows = %d, want 1", n)
+	ms, err := loadMigrations(migrationsFS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(ms) {
+		t.Fatalf("schema_migrations rows = %d, want %d", n, len(ms))
 	}
 	if err := Migrate(ctx, db.Write); err != nil {
 		t.Fatal(err)
@@ -81,7 +85,7 @@ func TestMigrateAppliesNewOnly(t *testing.T) {
 	defer db.Close()
 	fsys := fstest.MapFS{
 		"migrations/0001_init.sql":  {Data: []byte(`SELECT RAISE(ABORT, 'must not run again')`)},
-		"migrations/0002_extra.sql": {Data: []byte(`CREATE TABLE extra (id INTEGER PRIMARY KEY)`)},
+		"migrations/9999_extra.sql": {Data: []byte(`CREATE TABLE extra (id INTEGER PRIMARY KEY)`)},
 	}
 	if err := migrate(ctx, db.Write, fsys); err != nil {
 		t.Fatal(err)

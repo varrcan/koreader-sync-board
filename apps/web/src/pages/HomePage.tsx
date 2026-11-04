@@ -1,57 +1,35 @@
-import { SUPPORTED_LANGUAGES, isLanguage, setLanguage } from "@ksb/i18n";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { api } from "../api";
+import { api, failure } from "@/api";
+import { Card, CardContent } from "@/components/ui/card";
 
 function useVersion() {
   return useQuery({
     queryKey: ["version"],
     queryFn: async () => {
-      const { data, error } = await api.GET("/api/v1/version");
-      if (error) throw new Error(error.code);
+      const { data, error, response } = await api.GET("/api/v1/version");
+      if (error) throw failure(error, response);
       return data;
     },
   });
 }
 
 export function HomePage() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const version = useVersion();
 
-  useEffect(() => {
-    document.documentElement.lang = i18n.language;
-    document.title = t("app.title");
-  }, [i18n.language, t]);
-
   return (
-    <main className="page">
-      <header className="page__header">
-        <h1>{t("app.title")}</h1>
-        <label className="lang">
-          <span>{t("language.label")}</span>
-          <select
-            value={i18n.language}
-            onChange={(e) => {
-              if (isLanguage(e.target.value)) void setLanguage(e.target.value);
-            }}
-          >
-            {SUPPORTED_LANGUAGES.map((lng) => (
-              <option key={lng} value={lng}>
-                {lng.toUpperCase()}
-              </option>
-            ))}
-          </select>
-        </label>
-      </header>
-
-      <section className="card">
-        {version.isPending && <p className="muted">{t("version.loading")}</p>}
-        {version.isError && <p className="error">{t("version.loadError")}</p>}
-        {version.isSuccess && (
-          <p>{t("version.label", { version: version.data.version, commit: version.data.commit })}</p>
-        )}
-      </section>
-    </main>
+    <>
+      <h1 className="font-serif text-[clamp(24px,4vw,30px)] leading-tight font-medium">{t("nav.home")}</h1>
+      <Card className="max-w-xl py-4">
+        <CardContent className="text-sm">
+          {version.isPending && <p className="text-muted-foreground">{t("version.loading")}</p>}
+          {version.isError && <p className="text-destructive">{t("version.loadError")}</p>}
+          {version.isSuccess && (
+            <p>{t("version.label", { version: version.data.version, commit: version.data.commit })}</p>
+          )}
+        </CardContent>
+      </Card>
+    </>
   );
 }

@@ -1,6 +1,7 @@
 {
   "app": {
-    "title": "KOReader Sync Board"
+    "title": "KOReader Sync Board",
+    "brand": "sync board"
   },
   "version": {
     "label": "Version {{version}} (commit {{commit}})",
@@ -9,5 +10,59 @@
   },
   "language": {
     "label": "Language"
+  },
+  "nav": {
+    "home": "Home",
+    "password": "Change password"
+  },
+  "roles": {
+    "admin": "Administrator",
+    "user": "User"
+  },
+  "auth": {
+    "username": "Username",
+    "password": "Password",
+    "logout": "Log out"
+  },
+  "login": {
+    "title": "Sign in to the panel",
+    "description": "Your panel password, not a device password.",
+    "submit": "Sign in"
+  },
+  "setup": {
+    "title": "First run",
+    "description": "There are no users yet. Create an administrator — this needs the one-time setup code the server wrote to its log on startup.",
+    "findCode": "Find the code in the server log",
+    "docker": "Docker",
+    "systemd": "systemd",
+    "restartHint": "The code changes when the server restarts — use the last line.",
+    "code": "Setup code",
+    "passwordHint": "8 to 256 characters.",
+    "submit": "Create administrator",
+    "completed": "Setup is already complete.",
+    "toLogin": "Go to sign in"
+  },
+  "password": {
+    "title": "Change password",
+    "description": "Your other sessions will be signed out; this one stays.",
+    "current": "Current password",
+    "new": "New password",
+    "submit": "Change password",
+    "changed": "Password changed."
+  },
+  "copy": {
+    "copy": "Copy",
+    "copied": "Copied"
+  },
+  "errors": {
+    "invalid_credentials": "Wrong username or password.",
+    "invalid_current_password": "Wrong current password.",
+    "invalid_password": "The password must be 8 to 256 characters long.",
+    "invalid_username": "The name must not be empty or contain “:”.",
+    "invalid_setup_code": "Wrong setup code.",
+    "setup_completed": "Setup is already complete: sign in to the panel.",
+    "too_many_attempts": "Too many failed attempts. Try again in {{minutes}} min.",
+    "cross_origin": "Request rejected: it came from another site.",
+    "unknown": "The request failed. Please try again."
   }
 }

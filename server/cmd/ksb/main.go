@@ -1,9 +1,9 @@
 // Команда ksb — сервер koreader-sync-board и CLI управления им.
 //
-//	ksb serve                        запустить сервер
-//	ksb user add|list|disable|delete управление пользователями
-//	ksb device add|list|revoke       управление устройствами
-//	ksb healthcheck                  проверка работоспособности (для Docker HEALTHCHECK)
+//	ksb serve                               запустить сервер
+//	ksb user add|list|disable|delete|passwd управление пользователями
+//	ksb device add|list|revoke              управление устройствами
+//	ksb healthcheck                         проверка работоспособности (для Docker HEALTHCHECK)
 //	ksb version
 package main
 
@@ -30,6 +30,7 @@ commands:
   user list
   user disable <name>
   user delete <name>
+  user passwd <name>             prints a new panel password once
   device add <user> <device>     prints the device password once
   device list <user>
   device revoke <user> <device>

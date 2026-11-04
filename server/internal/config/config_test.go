@@ -58,3 +58,12 @@ func TestLoadInvalidTrustedProxies(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestLoadAdminVarsTogether(t *testing.T) {
+	for set, missing := range map[string]string{"ADMIN_USER": "ADMIN_PASSWORD", "ADMIN_PASSWORD": "ADMIN_USER"} {
+		_, err := Load(env(map[string]string{set: "value"}))
+		if err == nil || !strings.Contains(err.Error(), missing+" is not") {
+			t.Fatalf("only %s: %v", set, err)
+		}
+	}
+}

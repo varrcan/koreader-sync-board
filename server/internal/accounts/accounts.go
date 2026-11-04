@@ -6,9 +6,14 @@
 // кешируются, чтобы не платить argon2 на каждый запрос, но актуальность (отзыв,
 // отключение, смена ключа) сверяется с базой всегда: устройствами управляет и CLI,
 // отдельный процесс, кеш сервера которому недоступен.
+//
+// С ограничителем (WithLimiter) неудачные проверки считаются по адресу клиента,
+// а неудачные пары «пользователь — ключ» запоминаются: повтор того же неверного
+// ключа (отозванная читалка) отвечается без argon2 и бюджет адреса не тратит.
 package accounts
 
 import (
+	"cmp"
 	"context"
 	"crypto/md5"
 	"crypto/rand"
@@ -18,12 +23,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/netip"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
 )
 
@@ -36,7 +43,25 @@ var (
 	ErrDeviceExists = errors.New("device with this name already exists")
 	ErrNotFound     = errors.New("not found")
 	ErrInvalid      = errors.New("invalid argument")
+	// ErrRateLimited — адрес клиента заблокирован за неудачные входы. Возвращается
+	// как *RateLimitedError и ErrUnauthorized не оборачивает.
+	ErrRateLimited = errors.New("too many failed attempts")
+	// ErrRepeated сопровождает ErrUnauthorized или ErrUnknownUser, когда тот же
+	// ключ уже был отвергнут недавно. Такие отказы не стоит логировать: их шлёт
+	// отозванная читалка, и fail2ban по логу забанил бы её домашнюю сеть.
+	ErrRepeated = errors.New("key already rejected")
 )
+
+// RateLimitedError — ErrRateLimited со сроком, через который стоит повторить.
+type RateLimitedError struct {
+	RetryAfter time.Duration
+}
+
+func (e *RateLimitedError) Error() string {
+	return fmt.Sprintf("%v: retry after %v", ErrRateLimited, e.RetryAfter)
+}
+
+func (e *RateLimitedError) Unwrap() error { return ErrRateLimited }
 
 // Role — роль пользователя.
 type Role string
@@ -48,6 +73,7 @@ const (
 
 const (
 	cacheTTL         = 10 * time.Minute
+	cacheMaxEntries  = 10_000
 	lastUsedInterval = time.Minute
 )
 
@@ -83,6 +109,18 @@ type cacheEntry struct {
 	expires      time.Time
 }
 
+func (e cacheEntry) expiresAt() time.Time { return e.expires }
+
+// rejectEntry — запомненная неудача; user — хеш имени, чтобы забыть неудачи
+// пользователя при смене его учётных данных. Хеш, а не строка: имя приходит
+// из заголовка (до 1 MiB), и 10 000 записей с длинными именами съели бы гигабайты.
+type rejectEntry struct {
+	user    [32]byte
+	expires time.Time
+}
+
+func (e rejectEntry) expiresAt() time.Time { return e.expires }
+
 // Service — пользователи и устройства поверх одной базы.
 type Service struct {
 	db     *store.DB
@@ -93,8 +131,11 @@ type Service struct {
 	sem   chan struct{}
 	dummy string // хеш случайного ключа для фиктивной проверки
 
-	mu    sync.Mutex
-	cache map[[32]byte]cacheEntry
+	limiter *ratelimit.Limiter
+
+	mu       sync.Mutex
+	cache    map[[32]byte]cacheEntry
+	rejected map[[32]byte]rejectEntry
 
 	argonCalls     atomic.Int64 // для тестов
 	lastUsedWrites atomic.Int64 // для тестов
@@ -109,14 +150,19 @@ func WithClock(now func() time.Time) Option { return func(s *Service) { s.now = 
 // WithArgon2Params задаёт параметры argon2id для новых хешей.
 func WithArgon2Params(p Argon2Params) Option { return func(s *Service) { s.params = p } }
 
+// WithLimiter включает ограничение неудачных проверок по адресу клиента и
+// запоминание неудачных пар «пользователь — ключ».
+func WithLimiter(l *ratelimit.Limiter) Option { return func(s *Service) { s.limiter = l } }
+
 // New создаёт сервис.
 func New(db *store.DB, opts ...Option) *Service {
 	s := &Service{
-		db:     db,
-		now:    time.Now,
-		params: DefaultArgon2Params,
-		sem:    make(chan struct{}, runtime.GOMAXPROCS(0)),
-		cache:  map[[32]byte]cacheEntry{},
+		db:       db,
+		now:      time.Now,
+		params:   DefaultArgon2Params,
+		sem:      make(chan struct{}, runtime.GOMAXPROCS(0)),
+		cache:    map[[32]byte]cacheEntry{},
+		rejected: map[[32]byte]rejectEntry{},
 	}
 	for _, o := range opts {
 		o(s)
@@ -178,8 +224,17 @@ func (s *Service) CreateUser(ctx context.Context, username string, role Role) (U
 }
 
 // CreateUserWithDevice создаёт пользователя с ролью user и одним устройством с
-// готовым ключом (POST /users/create: пароль в теле — это уже md5).
-func (s *Service) CreateUserWithDevice(ctx context.Context, username, deviceName, key string) error {
+// готовым ключом (POST /users/create: пароль в теле — это уже md5). С ограничителем
+// каждая попытка, удачная тоже, расходует бюджет адреса client: ограничивается
+// именно массовое создание аккаунтов.
+func (s *Service) CreateUserWithDevice(ctx context.Context, username, deviceName, key string, client netip.Addr) error {
+	if s.limiter != nil {
+		att, retry, ok := s.limiter.Acquire(client)
+		if !ok {
+			return &RateLimitedError{RetryAfter: retry}
+		}
+		defer att.Fail()
+	}
 	keyHash, err := s.hash(key)
 	if err != nil {
 		return err
@@ -205,7 +260,11 @@ func (s *Service) CreateUserWithDevice(ctx context.Context, username, deviceName
 		userID, deviceName, keyHash, now); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.forgetRejected(username)
+	return nil
 }
 
 // ListUsers возвращает пользователей по имени.
@@ -280,14 +339,16 @@ func (s *Service) AddDevice(ctx context.Context, username, name string) (string,
 		}
 		return "", ErrDeviceExists
 	}
+	s.forgetRejected(username)
 	return password, nil
 }
 
-// newDevicePassword — 16 символов base32 в нижнем регистре группами по 4 (80 бит):
-// такой пароль удобно набирать на экранной клавиатуре читалки.
+// newDevicePassword — 8 символов base32 в нижнем регистре через дефис посередине
+// (40 бит): короткий пароль удобно набирать на экранной клавиатуре читалки, а
+// онлайн-подбор сдерживает ограничитель. В алфавите нет 0/1/8/9, путаницы с o/l нет.
 func newDevicePassword() string {
-	t := strings.ToLower(rand.Text())[:16]
-	return t[0:4] + "-" + t[4:8] + "-" + t[8:12] + "-" + t[12:16]
+	t := strings.ToLower(rand.Text())[:8]
+	return t[:4] + "-" + t[4:]
 }
 
 // ListDevices возвращает устройства пользователя, включая отозванные.
@@ -333,45 +394,98 @@ func (s *Service) RevokeDevice(ctx context.Context, username, name string) error
 	return affected(res, err)
 }
 
-// Authenticate проверяет ключ kosync. Для несуществующего пользователя и
-// пользователя без устройств выполняется фиктивная проверка, чтобы время
-// ответа не выдавало, существует ли имя.
-func (s *Service) Authenticate(ctx context.Context, username, key string) (Principal, error) {
+// Authenticate проверяет ключ kosync, пришедший с адреса client. Для
+// несуществующего пользователя и пользователя без устройств выполняется
+// фиктивная проверка, чтобы время ответа не выдавало, существует ли имя.
+//
+// Порядок: кеш удачных проверок (со сверкой в БД) → запомненные неудачи →
+// ограничитель → argon2. Закешированное устройство проходит и с заблокированного
+// адреса; остальные с него получают *RateLimitedError без argon2.
+func (s *Service) Authenticate(ctx context.Context, username, key string, client netip.Addr) (Principal, error) {
 	var userID int64
 	var disabled sql.NullInt64
 	err := s.db.Read.QueryRowContext(ctx,
 		`SELECT id, disabled_at FROM users WHERE username = ?`, username).Scan(&userID, &disabled)
-	if errors.Is(err, sql.ErrNoRows) {
-		s.verify(key, s.dummy)
-		return Principal{}, ErrUnknownUser
-	}
-	if err != nil {
+	// reject — ошибка, если ключ не подойдёт заведомо; проверка всё равно идёт
+	// по общему пути, чтобы ни время, ни бюджет не выдавали имя.
+	var reject error
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		reject = ErrUnknownUser
+	case err != nil:
 		return Principal{}, err
-	}
-	if disabled.Valid {
-		s.verify(key, s.dummy)
-		return Principal{}, ErrUnauthorized
+	case disabled.Valid:
+		reject = ErrUnauthorized
 	}
 
 	ck := cacheKey(userID, key)
-	if e, ok := s.cached(ck); ok {
-		var lastUsed sql.NullInt64
-		err := s.db.Read.QueryRowContext(ctx, `
-			SELECT d.last_used_at FROM device_credentials d JOIN users u ON u.id = d.user_id
-			WHERE d.id = ? AND d.user_id = ? AND d.key_rev = ?
-			  AND d.revoked_at IS NULL AND u.disabled_at IS NULL`,
-			e.credentialID, userID, e.keyRev).Scan(&lastUsed)
-		switch {
-		case err == nil:
-			p := Principal{UserID: userID, Username: username, CredentialID: e.credentialID, KeyRev: e.keyRev}
-			return p, s.touch(ctx, p.CredentialID, lastUsed)
-		case errors.Is(err, sql.ErrNoRows):
-			s.evict(ck)
-		default:
-			return Principal{}, err
+	if reject == nil {
+		if p, ok, err := s.fromCache(ctx, ck, userID, username); ok || err != nil {
+			return p, err
 		}
 	}
 
+	rk := rejectKey(username, key)
+	if s.limiter != nil && s.wasRejected(rk) {
+		return Principal{}, fmt.Errorf("%w: %w", cmp.Or(reject, ErrUnauthorized), ErrRepeated)
+	}
+	var att ratelimit.Attempt
+	if s.limiter != nil {
+		a, retry, ok := s.limiter.Acquire(client)
+		if !ok {
+			return Principal{}, &RateLimitedError{RetryAfter: retry}
+		}
+		att = a
+	}
+
+	p, err := s.verifyCredentials(ctx, ck, userID, username, key, reject)
+	switch {
+	case errors.Is(err, ErrUnauthorized):
+		att.Fail()
+		if s.limiter != nil {
+			s.rememberRejected(rk, username)
+		}
+	default:
+		att.Release()
+	}
+	return p, err
+}
+
+// fromCache проверяет кеш удачных проверок и сверяет запись с БД. Попадание
+// продлевает срок записи: активная читалка не выпадает из кеша, пока её адрес
+// заблокирован. Это безопасно, потому что каждое попадание сверяется с БД.
+func (s *Service) fromCache(ctx context.Context, ck [32]byte, userID int64, username string) (Principal, bool, error) {
+	e, ok := s.cached(ck)
+	if !ok {
+		return Principal{}, false, nil
+	}
+	var lastUsed sql.NullInt64
+	err := s.db.Read.QueryRowContext(ctx, `
+		SELECT d.last_used_at FROM device_credentials d JOIN users u ON u.id = d.user_id
+		WHERE d.id = ? AND d.user_id = ? AND d.key_rev = ?
+		  AND d.revoked_at IS NULL AND u.disabled_at IS NULL`,
+		e.credentialID, userID, e.keyRev).Scan(&lastUsed)
+	switch {
+	case err == nil:
+		e.expires = s.now().Add(cacheTTL)
+		s.store(ck, e)
+		p := Principal{UserID: userID, Username: username, CredentialID: e.credentialID, KeyRev: e.keyRev}
+		return p, true, s.touch(ctx, p.CredentialID, lastUsed)
+	case errors.Is(err, sql.ErrNoRows):
+		s.evict(ck)
+		return Principal{}, false, nil
+	default:
+		return Principal{}, false, err
+	}
+}
+
+// verifyCredentials — медленная проверка argon2 по активным устройствам или
+// фиктивная, если reject != nil или устройств нет.
+func (s *Service) verifyCredentials(ctx context.Context, ck [32]byte, userID int64, username, key string, reject error) (Principal, error) {
+	if reject != nil {
+		s.verify(key, s.dummy)
+		return Principal{}, reject
+	}
 	creds, err := s.activeCredentials(ctx, userID)
 	if err != nil {
 		return Principal{}, err
@@ -469,7 +583,11 @@ func (s *Service) RotateKey(ctx context.Context, p Principal, newKey string) err
 		keyHash, p.CredentialID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.forgetRejected(p.Username)
+	return nil
 }
 
 // Bootstrap создаёт администратора с паролем панели, если пользователей ещё нет
@@ -515,39 +633,92 @@ func cacheKey(userID int64, key string) [32]byte {
 	return out
 }
 
+// rejectKey — ключ запомненной неудачи. По имени, а не по id: неудачи
+// несуществующих пользователей тоже запоминаются. Длина имени входит в хеш,
+// чтобы пары ("ab", "c…") и ("a", "bc…") не совпадали.
+func rejectKey(username, key string) [32]byte {
+	h := sha256.New()
+	var b [8]byte
+	binary.BigEndian.PutUint64(b[:], uint64(len(username)))
+	h.Write(b[:])
+	h.Write([]byte(username))
+	h.Write([]byte(key))
+	var out [32]byte
+	h.Sum(out[:0])
+	return out
+}
+
 func (s *Service) cached(k [32]byte) (cacheEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	e, ok := s.cache[k]
-	if ok && s.now().After(e.expires) {
-		delete(s.cache, k)
-		return cacheEntry{}, false
-	}
-	return e, ok
+	return lookupTTL(s.cache, k, s.now())
 }
 
 func (s *Service) store(k [32]byte, e cacheEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Не даём кешу расти бесконечно: при переполнении выбрасываем просроченные.
-	if len(s.cache) >= 10_000 {
-		now := s.now()
-		for k, v := range s.cache {
-			if now.After(v.expires) {
-				delete(s.cache, k)
-			}
-		}
-		if len(s.cache) >= 10_000 {
-			clear(s.cache)
-		}
-	}
-	s.cache[k] = e
+	putBounded(s.cache, k, e, s.now())
 }
 
 func (s *Service) evict(k [32]byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.cache, k)
+}
+
+func (s *Service) wasRejected(k [32]byte) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := lookupTTL(s.rejected, k, s.now())
+	return ok
+}
+
+func (s *Service) rememberRejected(k [32]byte, username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putBounded(s.rejected, k, rejectEntry{user: sha256.Sum256([]byte(username)), expires: s.now().Add(cacheTTL)}, s.now())
+}
+
+// forgetRejected забывает неудачи пользователя, чьи учётные данные изменились:
+// ранее отвергнутый ключ мог стать верным. Изменения из CLI (другой процесс)
+// сюда не доходят, но CLI выдаёт случайные пароли, а остальное ограничивает TTL.
+func (s *Service) forgetRejected(username string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user := sha256.Sum256([]byte(username))
+	for k, e := range s.rejected {
+		if e.user == user {
+			delete(s.rejected, k)
+		}
+	}
+}
+
+type expiring interface{ expiresAt() time.Time }
+
+func lookupTTL[V expiring](m map[[32]byte]V, k [32]byte, now time.Time) (V, bool) {
+	e, ok := m[k]
+	if ok && now.After(e.expiresAt()) {
+		delete(m, k)
+		var zero V
+		return zero, false
+	}
+	return e, ok
+}
+
+// putBounded не даёт кешу расти бесконечно: при переполнении выбрасываются
+// просроченные записи, а если их нет — все.
+func putBounded[V expiring](m map[[32]byte]V, k [32]byte, v V, now time.Time) {
+	if _, ok := m[k]; !ok && len(m) >= cacheMaxEntries {
+		for k, e := range m {
+			if now.After(e.expiresAt()) {
+				delete(m, k)
+			}
+		}
+		if len(m) >= cacheMaxEntries {
+			clear(m)
+		}
+	}
+	m[k] = v
 }
 
 func affected(res sql.Result, err error) error {

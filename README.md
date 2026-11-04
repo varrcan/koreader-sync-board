@@ -44,8 +44,9 @@ docker exec ksb /ksb user add alice
 docker exec ksb /ksb device add alice "Kindle"
 ```
 
-`device add` prints the device password **once**; it is not stored in readable form and
-cannot be shown again. Create a separate device for each e-reader:
+`device add` prints the device password **once**, in the form `xxxx-xxxx` (8 random
+characters, easy to type on an e-reader keyboard); it is not stored in readable form and
+cannot be shown again. Passwords issued by earlier versions in a longer format keep working. Create a separate device for each e-reader:
 
 ```sh
 docker exec ksb /ksb device list alice           # names, creation and last use, revoked flag
@@ -75,9 +76,91 @@ Both document matching methods (*Binary* and *Filename*) are supported.
 | `KSB_DATA_DIR` | `/data` | Data directory (SQLite database `ksb.sqlite3`) |
 | `KSB_KOSYNC_REGISTRATION` | `false` | Allow creating accounts from KOReader (`POST /users/create`) |
 | `KSB_KOSYNC_SELF_DELETE` | `false` | Allow deleting an account from the device (`DELETE /users/me`) |
+| `KSB_TRUSTED_PROXIES` | — | Reverse proxies whose `X-Forwarded-For` is trusted: CIDRs or single addresses, comma-separated (see below) |
 | `ADMIN_USER`, `ADMIN_PASSWORD` | — | Create an admin with a panel password on first start (empty database only) |
 
 `serve` also accepts `-listen` and `-data-dir`, which override the environment.
+
+## Failed logins
+
+After **10 failed logins within 10 minutes** from one client address, that address is
+blocked for **15 minutes**. IPv6 clients are counted per `/64` network. Counters live in
+memory and reset on restart.
+
+- KOReader shows the reason: *"Too many failed attempts. Try again in N minutes."*
+  (status 401, code 2001, plus a `Retry-After` header for other clients). A blocked
+  `POST /users/create` gets 402/2005 with a similar text.
+- A device that has logged in recently keeps syncing from a blocked address: the server
+  remembers successful checks, and every request extends that.
+- Sending the **same** wrong password again (for example, a forgotten e-reader whose device
+  was revoked) is answered at once and does not count towards the limit, so it cannot
+  lock out the other e-readers in the same home network.
+- With registration enabled, every `POST /users/create` counts as an attempt, successful
+  ones too.
+
+## Behind a reverse proxy
+
+Behind nginx, nginx proxy manager, Caddy or Traefik every request comes from the proxy's
+address. Tell the server which addresses are your proxy, so that it takes the client
+address from `X-Forwarded-For`:
+
+```sh
+docker run ... -e KSB_TRUSTED_PROXIES=172.17.0.0/16 koreader-sync-board
+```
+
+List **only the proxy itself** (its address, or the Docker network it reaches the server
+from). The header is read right to left, and the first address that is not a trusted proxy
+is the client; for a request from a non-trusted address the header is ignored. The proxy
+must append the client address, as nginx does with
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (nginx proxy manager does
+this by default).
+
+Getting this wrong has consequences either way:
+
+- **not set** behind a proxy: all clients share the proxy's address, so one attacker blocks
+  logins for everyone whose device has not logged in recently, and the log shows only the
+  proxy;
+- **too broad** (for example `0.0.0.0/0`): any client can put an arbitrary address into
+  `X-Forwarded-For` and bypass the limit.
+
+### fail2ban
+
+Every failed login is logged as one JSON line with the client address:
+
+```json
+{"time":"2026-11-04T21:47:10.84+03:00","level":"WARN","msg":"kosync: authorization failed","user":"alice","ip":"198.51.100.7","path":"/users/auth","reason":"unauthorized"}
+```
+
+Repeats of an already rejected password and requests refused because of a block are not
+logged. To ban persistent offenders for longer, create `/etc/fail2ban/filter.d/ksb.conf`:
+
+```ini
+[Definition]
+# Matches the plain JSON line and Docker's json-file log, where quotes are escaped.
+failregex = \\?"msg\\?":\\?"kosync: authorization failed\\?".*\\?"ip\\?":\\?"<HOST>\\?",\\?"path\\?"
+datepattern = "time\\?":\\?"%%Y-%%m-%%dT%%H:%%M:%%S(?:\.\d+)?%%z
+```
+
+and `/etc/fail2ban/jail.d/ksb.local`:
+
+```ini
+[ksb]
+enabled  = true
+filter   = ksb
+# Docker's default json-file driver; for a binary under systemd use
+# backend = systemd and journalmatch = _SYSTEMD_UNIT=ksb.service instead.
+logpath  = /var/lib/docker/containers/*/*-json.log
+maxretry = 30
+findtime = 1h
+bantime  = 1d
+port     = http,https
+# Ports published by Docker bypass the INPUT chain.
+chain    = DOCKER-USER
+```
+
+Ban on the host that receives the client connections: with a reverse proxy, that is the
+proxy's host. Check the filter against your log with
+`fail2ban-regex /var/lib/docker/containers/<id>/<id>-json.log /etc/fail2ban/filter.d/ksb.conf`.
 
 ## Talking to the sync API with curl
 
@@ -85,7 +168,7 @@ Like the reference server, the sync API requires a versioned `Accept` header and
 authenticates with the **MD5 of the device password**:
 
 ```sh
-KEY=$(printf %s 'abcd-efgh-ijkl-mnop' | md5sum | cut -d' ' -f1)
+KEY=$(printf %s 'abcd-efgh' | md5sum | cut -d' ' -f1)
 curl -H 'Accept: application/vnd.koreader.v1+json' \
      -H 'x-auth-user: alice' -H "x-auth-key: $KEY" \
      http://localhost:8080/users/auth

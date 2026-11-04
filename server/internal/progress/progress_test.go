@@ -2,6 +2,7 @@ package progress
 
 import (
 	"context"
+	"net/netip"
 	"path/filepath"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func TestSaveIsAtomic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := acc.Authenticate(ctx, "alice", accounts.KeyFromPassword(pass))
+	p, err := acc.Authenticate(ctx, "alice", accounts.KeyFromPassword(pass), netip.Addr{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,10 +3,12 @@ package kosync
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -14,7 +16,9 @@ import (
 	"time"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
+	"github.com/varrcan/koreader-sync-board/server/internal/clientip"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
+	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
 )
 
@@ -23,14 +27,15 @@ const accept = "application/vnd.koreader.v1+json"
 var now = time.Unix(1_700_000_000, 0)
 
 type env struct {
-	t      *testing.T
-	ctx    context.Context
-	path   string
-	db     *store.DB
-	acc    *accounts.Service
-	h      *Handler
-	keys   map[string]string // "user/device" → x-auth-key
-	logBuf *strings.Builder
+	t       *testing.T
+	ctx     context.Context
+	path    string
+	db      *store.DB
+	acc     *accounts.Service
+	h       *Handler
+	keys    map[string]string // "user/device" → x-auth-key
+	logBuf  *strings.Builder
+	guesses int
 }
 
 func newEnv(t *testing.T, opts Options) *env {
@@ -68,12 +73,15 @@ type req struct {
 	headers            map[string]string
 	noAccept           bool
 	as                 string // "user/device"
+	remote             string // RemoteAddr, по умолчанию 192.0.2.1:1234
+	xff                string
 }
 
 type resp struct {
-	status int
-	ctype  string
-	body   any
+	status     int
+	ctype      string
+	retryAfter string
+	body       any
 }
 
 func (e *env) do(r req) resp {
@@ -94,9 +102,15 @@ func (e *env) do(r req) resp {
 	for k, v := range r.headers {
 		hr.Header.Set(k, v)
 	}
+	if r.remote != "" {
+		hr.RemoteAddr = r.remote
+	}
+	if r.xff != "" {
+		hr.Header.Set("X-Forwarded-For", r.xff)
+	}
 	w := httptest.NewRecorder()
 	e.h.ServeHTTP(w, hr)
-	out := resp{status: w.Code, ctype: w.Header().Get("Content-Type")}
+	out := resp{status: w.Code, ctype: w.Header().Get("Content-Type"), retryAfter: w.Header().Get("Retry-After")}
 	if w.Code != http.StatusNotFound {
 		if err := json.Unmarshal(w.Body.Bytes(), &out.body); err != nil {
 			e.t.Fatalf("%s %s: invalid JSON %q", r.method, r.path, w.Body.String())
@@ -188,6 +202,13 @@ func TestAuth(t *testing.T) {
 	}
 	if strings.Contains(e.logBuf.String(), e.keys["bob/Kindle"]) {
 		t.Error("key leaked to log")
+	}
+
+	long := strings.Repeat("я", 100_000) + ":"
+	e.check("huge user", req{method: "GET", path: "/users/auth", headers: map[string]string{"x-auth-user": long, "x-auth-key": "k"}}, 401, unauthorized)
+	last := e.logBuf.String()[strings.LastIndex(strings.TrimSuffix(e.logBuf.String(), "\n"), "\n")+1:]
+	if len(last) > 512 || !strings.Contains(last, `"user":"`+strings.Repeat("я", 32)+`…"`) {
+		t.Errorf("long user name not truncated in log (%d bytes)", len(last))
 	}
 }
 
@@ -315,5 +336,126 @@ func TestDeleteMe(t *testing.T) {
 	e.db.Read.QueryRow(`SELECT count(*) FROM documents`).Scan(&docs)
 	if docs != 1 {
 		t.Fatalf("documents = %d, want 1", docs)
+	}
+}
+
+// limited пересобирает обработчик с ограничителем на тех же часах.
+func (e *env) limited(opts Options) *env {
+	log := slog.New(slog.NewJSONHandler(e.logBuf, nil))
+	clock := func() time.Time { return now }
+	lim := ratelimit.New(log, ratelimit.WithClock(clock))
+	e.acc = accounts.New(e.db, accounts.WithClock(clock), accounts.WithArgon2Params(accounts.TestArgon2Params), accounts.WithLimiter(lim))
+	e.h = New(e.acc, progress.New(e.db), opts, log)
+	e.h.now = clock
+	return e
+}
+
+// fail шлёт n запросов GET /users/auth с разными неверными ключами.
+func (e *env) fail(n int, r req) {
+	e.t.Helper()
+	for range n {
+		e.guesses++
+		r.method, r.path = "GET", "/users/auth"
+		r.headers = map[string]string{"x-auth-user": "alice", "x-auth-key": fmt.Sprint("guess", e.guesses)}
+		e.check(fmt.Sprint("guess ", e.guesses), r, 401, errBody(2001, "Unauthorized"))
+	}
+}
+
+func (e *env) checkBlocked(name string, r req, status int, body any) {
+	e.t.Helper()
+	got := e.do(r)
+	if got.status != status || got.ctype != "application/json" || got.retryAfter != "900" || !reflect.DeepEqual(got.body, body) {
+		e.t.Errorf("%s: %d %q Retry-After=%q %#v", name, got.status, got.ctype, got.retryAfter, got.body)
+	}
+}
+
+func TestRateLimit(t *testing.T) {
+	opts := Options{SelfDelete: true}
+	e := newEnv(t, opts).limited(opts)
+	blocked := errBody(2001, "Too many failed attempts. Try again in 15 minutes.")
+	e.check("cache kindle", req{method: "GET", path: "/users/auth", as: "alice/Kindle"}, 200, nil)
+	e.fail(ratelimit.MaxFails, req{})
+
+	e.checkBlocked("auth", req{method: "GET", path: "/users/auth", headers: map[string]string{"x-auth-user": "alice", "x-auth-key": "new guess"}}, 401, blocked)
+	e.checkBlocked("auth valid uncached", req{method: "GET", path: "/users/auth", as: "alice/Kobo"}, 401, blocked)
+	e.checkBlocked("put progress", req{method: "PUT", path: "/syncs/progress", body: goodPut, as: "alice/Kobo"}, 401, blocked)
+	e.checkBlocked("get progress", req{method: "GET", path: "/syncs/progress/abc123", as: "bob/Kindle"}, 401, blocked)
+	e.checkBlocked("password", req{method: "PUT", path: "/users/password", body: `{"password":"x"}`, as: "bob/Kindle"}, 401, blocked)
+	e.checkBlocked("delete me", req{method: "DELETE", path: "/users/me", as: "bob/Kobo"}, 401, blocked)
+	e.checkBlocked("delete unknown", req{method: "DELETE", path: "/users/me", headers: map[string]string{"x-auth-user": "ghost", "x-auth-key": "k"}}, 401, blocked)
+
+	// Ошибки до проверки ключа не меняются.
+	e.check("bad json", req{method: "PUT", path: "/syncs/progress", body: "{", as: "alice/Kobo"}, 400, errBody(103, "Could not parse JSON in body."))
+	e.check("array", req{method: "PUT", path: "/syncs/progress", body: "[1]", as: "alice/Kobo"}, 400, errBody(104, "Body should be a JSON hash."))
+	e.check("no accept", req{method: "GET", path: "/users/auth", as: "alice/Kobo", noAccept: true}, 412, errBody(100, "Accept header not set."))
+	e.check("no headers", req{method: "GET", path: "/users/auth"}, 401, errBody(2001, "Unauthorized"))
+	e.check("password body first", req{method: "PUT", path: "/users/password", body: `{}`, as: "bob/Kindle"}, 403, errBody(2003, "Invalid request"))
+
+	// Закешированное устройство и другой адрес обслуживаются.
+	e.check("cached kindle", req{method: "PUT", path: "/syncs/progress", body: goodPut, as: "alice/Kindle"}, 200, nil)
+	e.check("other address", req{method: "GET", path: "/users/auth", as: "alice/Kobo", remote: "198.51.100.1:1"}, 200, nil)
+
+	// Неудачи до блокировки и запрос без заголовков; отказы из-за блокировки не логируются.
+	if n := strings.Count(e.logBuf.String(), "authorization failed"); n != ratelimit.MaxFails+1 {
+		t.Errorf("%d failures logged, want %d", n, ratelimit.MaxFails+1)
+	}
+	if n := strings.Count(e.logBuf.String(), "auth: client blocked"); n != 1 {
+		t.Errorf("%d block warnings", n)
+	}
+}
+
+func TestRateLimitRevokedReader(t *testing.T) {
+	e := newEnv(t, Options{}).limited(Options{})
+	if err := e.acc.RevokeDevice(e.ctx, "alice", "Kindle"); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 50 {
+		e.check(fmt.Sprint("revoked ", i), req{method: "PUT", path: "/syncs/progress", body: goodPut, as: "alice/Kindle"}, 401, errBody(2001, "Unauthorized"))
+	}
+	e.check("kobo", req{method: "PUT", path: "/syncs/progress", body: goodPut, as: "alice/Kobo"}, 200, nil)
+	if n := strings.Count(e.logBuf.String(), "authorization failed"); n != 1 {
+		t.Errorf("repeated rejection logged %d times, want once", n)
+	}
+}
+
+func TestRateLimitRegistration(t *testing.T) {
+	off := newEnv(t, Options{}).limited(Options{})
+	for i := range 2 * ratelimit.MaxFails {
+		off.check(fmt.Sprint("disabled ", i), req{method: "POST", path: "/users/create", body: `{"username":"carol","password":"x"}`}, 402,
+			errBody(2005, "User registration is disabled."))
+	}
+	off.check("budget intact", req{method: "GET", path: "/users/auth", headers: map[string]string{"x-auth-user": "alice", "x-auth-key": "k"}}, 401, errBody(2001, "Unauthorized"))
+
+	opts := Options{Registration: true}
+	e := newEnv(t, opts).limited(opts)
+	for i := range 2 * ratelimit.MaxFails {
+		e.check(fmt.Sprint("invalid ", i), req{method: "POST", path: "/users/create", body: `{"username":"a:b","password":"x"}`}, 403, errBody(2003, "Invalid request"))
+	}
+	for i := range ratelimit.MaxFails - 1 {
+		e.check(fmt.Sprint("create ", i), req{method: "POST", path: "/users/create", body: fmt.Sprintf(`{"username":"user%d","password":"x"}`, i)}, 201, nil)
+	}
+	e.check("taken counts too", req{method: "POST", path: "/users/create", body: `{"username":"alice","password":"x"}`}, 402, errBody(2002, "Username is already registered."))
+	e.checkBlocked("blocked", req{method: "POST", path: "/users/create", body: `{"username":"zed","password":"x"}`}, 402,
+		errBody(2005, "Too many registration attempts. Try again in 15 minutes."))
+}
+
+func TestClientAddress(t *testing.T) {
+	trusted := Options{ClientIP: clientip.New([]netip.Prefix{netip.MustParsePrefix("10.0.0.0/8")})}
+	e := newEnv(t, trusted).limited(trusted)
+	viaProxy := req{remote: "10.0.0.2:5000", xff: "1.1.1.1, 198.51.100.7"}
+	e.fail(1, viaProxy)
+	if !strings.Contains(e.logBuf.String(), `"ip":"198.51.100.7"`) {
+		t.Fatalf("client address not logged: %s", e.logBuf)
+	}
+	e.fail(ratelimit.MaxFails-1, viaProxy)
+	e.checkBlocked("blocked via proxy", req{method: "GET", path: "/users/auth", as: "alice/Kobo", remote: "10.0.0.2:5000", xff: "198.51.100.7"}, 401,
+		errBody(2001, "Too many failed attempts. Try again in 15 minutes."))
+	e.check("other client via same proxy", req{method: "GET", path: "/users/auth", as: "alice/Kobo", remote: "10.0.0.2:5000", xff: "198.51.100.8"}, 200, nil)
+
+	// Без доверенных прокси заголовок игнорируется.
+	plain := newEnv(t, Options{})
+	plain.fail(1, req{remote: "203.0.113.5:4000", xff: "198.51.100.7"})
+	if !strings.Contains(plain.logBuf.String(), `"ip":"203.0.113.5"`) {
+		t.Fatalf("connection address not logged: %s", plain.logBuf)
 	}
 }

@@ -14,9 +14,11 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
 	"github.com/varrcan/koreader-sync-board/server/internal/apiv1"
 	"github.com/varrcan/koreader-sync-board/server/internal/buildinfo"
+	"github.com/varrcan/koreader-sync-board/server/internal/clientip"
 	"github.com/varrcan/koreader-sync-board/server/internal/config"
 	"github.com/varrcan/koreader-sync-board/server/internal/kosync"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
+	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
 	"github.com/varrcan/koreader-sync-board/server/internal/server"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
 	"github.com/varrcan/koreader-sync-board/server/internal/web"
@@ -36,7 +38,7 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	}
 	defer db.Close()
 
-	acc := accounts.New(db)
+	acc := accounts.New(db, accounts.WithLimiter(ratelimit.New(log)))
 	created, err := acc.Bootstrap(ctx, cfg.AdminUser, cfg.AdminPassword)
 	if err != nil {
 		return fmt.Errorf("bootstrap admin: %w", err)
@@ -49,6 +51,7 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 		Kosync: kosync.New(acc, progress.New(db), kosync.Options{
 			Registration: cfg.KosyncRegistration,
 			SelfDelete:   cfg.KosyncSelfDelete,
+			ClientIP:     clientip.New(cfg.TrustedProxies),
 		}, log),
 		API: apiv1.NewHandler(),
 		Web: web.Handler(),
@@ -67,7 +70,7 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	go func() { errc <- srv.ListenAndServe() }()
 	log.Info("server started", "listen", cfg.Listen, "data_dir", cfg.DataDir,
 		"version", buildinfo.Version, "kosync_registration", cfg.KosyncRegistration,
-		"kosync_self_delete", cfg.KosyncSelfDelete)
+		"kosync_self_delete", cfg.KosyncSelfDelete, "trusted_proxies", fmt.Sprint(cfg.TrustedProxies))
 
 	select {
 	case err := <-errc:

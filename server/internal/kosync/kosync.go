@@ -10,17 +10,19 @@ package kosync
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math"
-	"net"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
+	"github.com/varrcan/koreader-sync-board/server/internal/clientip"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 )
 
@@ -30,6 +32,8 @@ type Options struct {
 	Registration bool
 	// SelfDelete включает DELETE /users/me (иначе 2003).
 	SelfDelete bool
+	// ClientIP определяет адрес клиента для ограничителя и лога; nil — адрес соединения.
+	ClientIP *clientip.Resolver
 }
 
 // Handler обслуживает /users/*, /syncs/* и /healthcheck.
@@ -51,6 +55,9 @@ func New(acc *accounts.Service, prog *progress.Store, opts Options, log *slog.Lo
 
 // maxBody ограничивает тело запроса: запросы KOReader занимают сотни байт.
 const maxBody = 1 << 20
+
+// maxLoggedUser — сколько байт имени пользователя попадает в лог.
+const maxLoggedUser = 64
 
 // acceptRe — шаблон gin "^application/vnd." .. name .. ".v(%d+)(.*)+json$".
 // Точки в Lua-шаблоне — любой символ, «+» после «)» — литерал.
@@ -92,26 +99,27 @@ type call struct {
 
 // apiError — ошибка с кодом из config/errors.lua эталона или gin/core/error.lua.
 type apiError struct {
-	status  int
-	code    int
-	message string
+	status     int
+	code       int
+	message    string
+	retryAfter time.Duration
 }
 
 var (
-	errAcceptMissing = apiError{412, 100, "Accept header not set."}
-	errAcceptFormat  = apiError{412, 101, "Invalid Accept header format."}
-	errAcceptVersion = apiError{412, 102, "Unsupported version specified in the Accept header."}
-	errBadJSON       = apiError{400, 103, "Could not parse JSON in body."}
-	errNotHash       = apiError{400, 104, "Body should be a JSON hash."}
+	errAcceptMissing = apiError{status: 412, code: 100, message: "Accept header not set."}
+	errAcceptFormat  = apiError{status: 412, code: 101, message: "Invalid Accept header format."}
+	errAcceptVersion = apiError{status: 412, code: 102, message: "Unsupported version specified in the Accept header."}
+	errBadJSON       = apiError{status: 400, code: 103, message: "Could not parse JSON in body."}
+	errNotHash       = apiError{status: 400, code: 104, message: "Body should be a JSON hash."}
 
-	errInternal       = apiError{502, 2000, "Unknown server error."}
-	errUnauthorized   = apiError{401, 2001, "Unauthorized"}
-	errUserExists     = apiError{402, 2002, "Username is already registered."}
-	errInvalidFields  = apiError{403, 2003, "Invalid request"}
-	errNoDocument     = apiError{403, 2004, "Field 'document' not provided."}
-	errRegDisabled    = apiError{402, 2005, "User registration is disabled."}
-	errNoAccount      = apiError{404, 2006, "Account not found."}
-	errNotServableDoc = apiError{403, 2007, "Field 'document' contains characters the read route cannot serve."}
+	errInternal       = apiError{status: 502, code: 2000, message: "Unknown server error."}
+	errUnauthorized   = apiError{status: 401, code: 2001, message: "Unauthorized"}
+	errUserExists     = apiError{status: 402, code: 2002, message: "Username is already registered."}
+	errInvalidFields  = apiError{status: 403, code: 2003, message: "Invalid request"}
+	errNoDocument     = apiError{status: 403, code: 2004, message: "Field 'document' not provided."}
+	errRegDisabled    = apiError{status: 402, code: 2005, message: "User registration is disabled."}
+	errNoAccount      = apiError{status: 404, code: 2006, message: "Account not found."}
+	errNotServableDoc = apiError{status: 403, code: 2007, message: "Field 'document' contains characters the read route cannot serve."}
 )
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -194,6 +202,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func writeError(w http.ResponseWriter, e apiError) {
+	if e.retryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.FormatInt(int64(math.Ceil(e.retryAfter.Seconds())), 10))
+	}
 	writeJSON(w, e.status, map[string]any{"code": e.code, "message": e.message})
 }
 
@@ -239,10 +250,33 @@ func (h *Handler) authorize(c *call) (accounts.Principal, *apiError) {
 	return h.authenticate(c.r, user, key)
 }
 
+// blocked — ответ адресу, заблокированному за неудачные входы. Статус и код
+// берутся из expected_status клиента (kosync.koplugin/api.json): другой статус
+// KOReader не разбирает и показывает «Unknown server error», а message выводит
+// человеку. Поэтому отказ авторизации — 401/2001, регистрации — 402/2005, а срок —
+// в тексте. Такие отказы не логируются: начало блокировки пишет ограничитель.
+func blocked(base apiError, what string, err error) (apiError, bool) {
+	var rl *accounts.RateLimitedError
+	if !errors.As(err, &rl) {
+		return apiError{}, false
+	}
+	minutes := int(math.Ceil(rl.RetryAfter.Minutes()))
+	unit := "minutes"
+	if minutes == 1 {
+		unit = "minute"
+	}
+	base.message = fmt.Sprintf("Too many %s attempts. Try again in %d %s.", what, minutes, unit)
+	base.retryAfter = rl.RetryAfter
+	return base, true
+}
+
 func (h *Handler) authenticate(r *http.Request, user, key string) (accounts.Principal, *apiError) {
-	p, err := h.accounts.Authenticate(r.Context(), user, key)
+	p, err := h.accounts.Authenticate(r.Context(), user, key, h.clientAddr(r))
+	if e, ok := blocked(errUnauthorized, "failed", err); ok {
+		return accounts.Principal{}, &e
+	}
 	if errors.Is(err, accounts.ErrUnauthorized) {
-		h.logFailure(r, user, err.Error())
+		h.logRejected(r, user, err)
 		return accounts.Principal{}, &errUnauthorized
 	}
 	if err != nil {
@@ -252,18 +286,36 @@ func (h *Handler) authenticate(r *http.Request, user, key string) (accounts.Prin
 	return p, nil
 }
 
-// logFailure пишет неудачную попытку входа: имя и адрес, без ключа.
+func (h *Handler) clientAddr(r *http.Request) netip.Addr {
+	return h.opts.ClientIP.Addr(r)
+}
+
+// logFailure пишет неудачную попытку входа: имя и адрес клиента, без ключа.
+// По этой строке работает фильтр fail2ban из README.
 func (h *Handler) logFailure(r *http.Request, user, reason string) {
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		ip = r.RemoteAddr
+	ip := r.RemoteAddr
+	if a := h.clientAddr(r); a.IsValid() {
+		ip = a.String()
 	}
 	if user == "" {
 		if v, ok := header(r, "x-auth-user").(string); ok {
 			user = v
 		}
 	}
+	// Имя приходит из заголовка и может занимать до 1 MiB, а отказы без проверки
+	// ключа (битые заголовки) ограничителем не считаются: без обрезки лог раздувается.
+	if len(user) > maxLoggedUser {
+		user = strings.ToValidUTF8(user[:maxLoggedUser], "") + "…"
+	}
 	h.log.Warn("kosync: authorization failed", "user", user, "ip", ip, "path", r.URL.Path, "reason", reason)
+}
+
+// logRejected логирует отказ проверки ключа, кроме повтора недавно
+// отвергнутого ключа: в лог попадает только первая неудача.
+func (h *Handler) logRejected(r *http.Request, user string, err error) {
+	if !errors.Is(err, accounts.ErrRepeated) {
+		h.logFailure(r, user, err.Error())
+	}
 }
 
 func (h *Handler) authUser(c *call) (int, any) {
@@ -281,7 +333,10 @@ func (h *Handler) createUser(c *call) (int, any) {
 	if !isValidKeyField(username) || !isValidField(password) {
 		return 0, errInvalidFields
 	}
-	err := h.accounts.CreateUserWithDevice(c.r.Context(), username.(string), "KOReader", password.(string))
+	err := h.accounts.CreateUserWithDevice(c.r.Context(), username.(string), "KOReader", password.(string), h.clientAddr(c.r))
+	if e, ok := blocked(errRegDisabled, "registration", err); ok {
+		return 0, e
+	}
 	if errors.Is(err, accounts.ErrUserExists) {
 		return 0, errUserExists
 	}
@@ -305,12 +360,15 @@ func (h *Handler) deleteUser(c *call) (int, any) {
 		h.logFailure(c.r, user, "invalid credentials headers")
 		return 0, errUnauthorized
 	}
-	p, err := h.accounts.Authenticate(c.r.Context(), user, key)
+	p, err := h.accounts.Authenticate(c.r.Context(), user, key, h.clientAddr(c.r))
+	if e, ok := blocked(errUnauthorized, "failed", err); ok {
+		return 0, e
+	}
 	switch {
 	case errors.Is(err, accounts.ErrUnknownUser):
 		return 0, errNoAccount
 	case errors.Is(err, accounts.ErrUnauthorized):
-		h.logFailure(c.r, user, err.Error())
+		h.logRejected(c.r, user, err)
 		return 0, errUnauthorized
 	case err != nil:
 		h.log.Error("kosync: authenticate", "err", err)

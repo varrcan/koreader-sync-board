@@ -3,7 +3,10 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"strconv"
+
+	"github.com/varrcan/koreader-sync-board/server/internal/clientip"
 )
 
 // Config — настройки сервера. Флаги командной строки перекрывают значения из окружения.
@@ -15,6 +18,9 @@ type Config struct {
 	KosyncRegistration bool
 	// KosyncSelfDelete разрешает DELETE /users/me (KSB_KOSYNC_SELF_DELETE).
 	KosyncSelfDelete bool
+
+	// TrustedProxies — прокси, которым верим X-Forwarded-For (KSB_TRUSTED_PROXIES).
+	TrustedProxies []netip.Prefix
 
 	// AdminUser и AdminPassword создают администратора при пустой базе.
 	AdminUser     string // ADMIN_USER
@@ -44,6 +50,9 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 	if c.KosyncSelfDelete, err = parseBool(getenv, "KSB_KOSYNC_SELF_DELETE"); err != nil {
 		return Config{}, err
+	}
+	if c.TrustedProxies, err = clientip.ParsePrefixes(getenv("KSB_TRUSTED_PROXIES")); err != nil {
+		return Config{}, fmt.Errorf("KSB_TRUSTED_PROXIES: %w", err)
 	}
 	c.AdminUser = getenv("ADMIN_USER")
 	c.AdminPassword = getenv("ADMIN_PASSWORD")

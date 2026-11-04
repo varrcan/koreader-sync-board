@@ -38,7 +38,9 @@ commands:
 
 configuration (environment):
   KSB_LISTEN (:8080), KSB_DATA_DIR (/data), KSB_KOSYNC_REGISTRATION (false),
-  KSB_KOSYNC_SELF_DELETE (false), ADMIN_USER, ADMIN_PASSWORD
+  KSB_KOSYNC_SELF_DELETE (false), KSB_TRUSTED_PROXIES (CIDRs or addresses
+  of reverse proxies whose X-Forwarded-For is trusted, comma-separated),
+  ADMIN_USER, ADMIN_PASSWORD
 `
 
 func main() {

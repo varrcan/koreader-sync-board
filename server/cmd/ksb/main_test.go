@@ -35,7 +35,7 @@ func TestCLI(t *testing.T) {
 		t.Fatalf("duplicate user add succeeded: %s", out)
 	}
 	out, code := ksb("device", "add", "alice", "Kindle")
-	if code != 0 || !regexp.MustCompile(`password: [a-z2-7]{4}-[a-z2-7]{4}-[a-z2-7]{4}-[a-z2-7]{4}`).MatchString(out) {
+	if code != 0 || !regexp.MustCompile(`(?m)^  password: [a-z2-7]{4}-[a-z2-7]{4}$`).MatchString(out) {
 		t.Fatalf("device add: %d %s", code, out)
 	}
 	if out, _ := ksb("device", "list", "alice"); !strings.Contains(out, "Kindle") || strings.Contains(out, "password") {

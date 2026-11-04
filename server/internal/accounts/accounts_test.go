@@ -6,13 +6,21 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 
+	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
 )
+
+var client = netip.MustParseAddr("192.0.2.1")
 
 func md5hex(s string) string {
 	sum := md5.Sum([]byte(s))
@@ -110,21 +118,21 @@ func TestDevicesAuthenticate(t *testing.T) {
 		t.Fatalf("device for unknown user: %v", err)
 	}
 
-	p1, err := e.svc.Authenticate(e.ctx, "alice", kindle)
+	p1, err := e.svc.Authenticate(e.ctx, "alice", kindle, client)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p2, err := e.svc.Authenticate(e.ctx, "alice", kobo)
+	p2, err := e.svc.Authenticate(e.ctx, "alice", kobo, client)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p1.UserID != p2.UserID || p1.CredentialID == p2.CredentialID {
 		t.Fatalf("principals %+v %+v", p1, p2)
 	}
-	if _, err := e.svc.Authenticate(e.ctx, "alice", md5hex("wrong")); !errors.Is(err, ErrUnauthorized) {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", md5hex("wrong"), client); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("wrong key: %v", err)
 	}
-	if _, err := e.svc.Authenticate(e.ctx, "ghost", kindle); !errors.Is(err, ErrUnknownUser) || !errors.Is(err, ErrUnauthorized) {
+	if _, err := e.svc.Authenticate(e.ctx, "ghost", kindle, client); !errors.Is(err, ErrUnknownUser) || !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("unknown user: %v", err)
 	}
 
@@ -144,12 +152,12 @@ func TestRevokeAndDisableFromOtherConnection(t *testing.T) {
 	kobo := e.device(t, "alice", "Kobo")
 	// Прогреваем кеш сервера.
 	for _, k := range []string{kindle, kobo} {
-		if _, err := e.svc.Authenticate(e.ctx, "alice", k); err != nil {
+		if _, err := e.svc.Authenticate(e.ctx, "alice", k, client); err != nil {
 			t.Fatal(err)
 		}
 	}
 	before := e.svc.argonCalls.Load()
-	if _, err := e.svc.Authenticate(e.ctx, "alice", kindle); err != nil {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", kindle, client); err != nil {
 		t.Fatal(err)
 	}
 	if e.svc.argonCalls.Load() != before {
@@ -160,17 +168,17 @@ func TestRevokeAndDisableFromOtherConnection(t *testing.T) {
 	if err := cli.RevokeDevice(e.ctx, "alice", "Kindle"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.Authenticate(e.ctx, "alice", kindle); !errors.Is(err, ErrUnauthorized) {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", kindle, client); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("revoked device still authorized: %v", err)
 	}
-	if _, err := e.svc.Authenticate(e.ctx, "alice", kobo); err != nil {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", kobo, client); err != nil {
 		t.Fatalf("other device broken: %v", err)
 	}
 
 	if err := cli.DisableUser(e.ctx, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.Authenticate(e.ctx, "alice", kobo); !errors.Is(err, ErrUnauthorized) {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", kobo, client); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("disabled user authorized: %v", err)
 	}
 }
@@ -180,7 +188,7 @@ func TestRotateKey(t *testing.T) {
 	mustUser(t, e, "alice", RoleUser)
 	kindle := e.device(t, "alice", "Kindle")
 	kobo := e.device(t, "alice", "Kobo")
-	p, err := e.svc.Authenticate(e.ctx, "alice", kindle)
+	p, err := e.svc.Authenticate(e.ctx, "alice", kindle, client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,13 +198,13 @@ func TestRotateKey(t *testing.T) {
 	if err := cli.RotateKey(e.ctx, p, newKey); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.Authenticate(e.ctx, "alice", kindle); !errors.Is(err, ErrUnauthorized) {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", kindle, client); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("old cached key works: %v", err)
 	}
-	if _, err := e.svc.Authenticate(e.ctx, "alice", newKey); err != nil {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", newKey, client); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.Authenticate(e.ctx, "alice", kobo); err != nil {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", kobo, client); err != nil {
 		t.Fatal(err)
 	}
 	// Повторная ротация по устаревшему принципалу отклоняется.
@@ -209,7 +217,7 @@ func TestCheckTx(t *testing.T) {
 	e := newEnv(t)
 	mustUser(t, e, "alice", RoleUser)
 	key := e.device(t, "alice", "Kindle")
-	p, err := e.svc.Authenticate(e.ctx, "alice", key)
+	p, err := e.svc.Authenticate(e.ctx, "alice", key, client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +247,7 @@ func TestDeleteUser(t *testing.T) {
 	if err := e.svc.DeleteUser(e.ctx, "alice"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.svc.Authenticate(e.ctx, "alice", key); !errors.Is(err, ErrUnknownUser) {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", key, client); !errors.Is(err, ErrUnknownUser) {
 		t.Fatalf("deleted user: %v", err)
 	}
 	var n int
@@ -261,7 +269,7 @@ func TestDummyCheckForUnknownUser(t *testing.T) {
 	cases := []struct{ user string }{{"ghost"}, {"alice"}}
 	for _, c := range cases {
 		before := e.svc.argonCalls.Load()
-		_, _ = e.svc.Authenticate(e.ctx, c.user, md5hex("wrong"))
+		_, _ = e.svc.Authenticate(e.ctx, c.user, md5hex("wrong"), client)
 		if got := e.svc.argonCalls.Load() - before; got != 1 {
 			t.Fatalf("%s: %d argon2 calls, want 1", c.user, got)
 		}
@@ -269,7 +277,7 @@ func TestDummyCheckForUnknownUser(t *testing.T) {
 	// Пользователь без устройств: тоже одна фиктивная проверка.
 	mustUser(t, e, "bob", RoleUser)
 	before := e.svc.argonCalls.Load()
-	_, _ = e.svc.Authenticate(e.ctx, "bob", md5hex("wrong"))
+	_, _ = e.svc.Authenticate(e.ctx, "bob", md5hex("wrong"), client)
 	if got := e.svc.argonCalls.Load() - before; got != 1 {
 		t.Fatalf("bob: %d argon2 calls, want 1", got)
 	}
@@ -282,7 +290,7 @@ func TestNoPlaintextKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.CreateUserWithDevice(e.ctx, "bob", "KOReader", md5hex("bobpass")); err != nil {
+	if err := e.svc.CreateUserWithDevice(e.ctx, "bob", "KOReader", md5hex("bobpass"), client); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.svc.Bootstrap(e.ctx, "root", "rootpass"); err != nil {
@@ -314,7 +322,7 @@ func TestLastUsedAtPerMinute(t *testing.T) {
 		return v
 	}
 	t0 := e.clock.t
-	if _, err := e.svc.Authenticate(e.ctx, "alice", key); err != nil {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", key, client); err != nil {
 		t.Fatal(err)
 	}
 	if lastUsed() != t0.Unix() {
@@ -322,14 +330,14 @@ func TestLastUsedAtPerMinute(t *testing.T) {
 	}
 	e.clock.t = t0.Add(30 * time.Second)
 	writes := e.svc.lastUsedWrites.Load()
-	if _, err := e.svc.Authenticate(e.ctx, "alice", key); err != nil {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", key, client); err != nil {
 		t.Fatal(err)
 	}
 	if lastUsed() != t0.Unix() || e.svc.lastUsedWrites.Load() != writes {
 		t.Fatal("last_used_at rewritten within a minute")
 	}
 	e.clock.t = t0.Add(61 * time.Second)
-	if _, err := e.svc.Authenticate(e.ctx, "alice", key); err != nil {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", key, client); err != nil {
 		t.Fatal(err)
 	}
 	if lastUsed() != e.clock.t.Unix() {
@@ -348,7 +356,7 @@ func TestBootstrap(t *testing.T) {
 		t.Fatalf("users = %+v", users)
 	}
 	// Пароль панели не работает в kosync: устройств нет.
-	if _, err := e.svc.Authenticate(e.ctx, "admin", md5hex("secret")); !errors.Is(err, ErrUnauthorized) {
+	if _, err := e.svc.Authenticate(e.ctx, "admin", md5hex("secret"), client); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("panel password accepted by kosync: %v", err)
 	}
 	var hash1 string
@@ -386,13 +394,13 @@ func TestBootstrapNeedsBothVars(t *testing.T) {
 func TestCreateUserWithDevice(t *testing.T) {
 	e := newEnv(t)
 	key := md5hex("pw")
-	if err := e.svc.CreateUserWithDevice(e.ctx, "alice", "KOReader", key); err != nil {
+	if err := e.svc.CreateUserWithDevice(e.ctx, "alice", "KOReader", key, client); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.CreateUserWithDevice(e.ctx, "alice", "KOReader", key); !errors.Is(err, ErrUserExists) {
+	if err := e.svc.CreateUserWithDevice(e.ctx, "alice", "KOReader", key, client); !errors.Is(err, ErrUserExists) {
 		t.Fatalf("duplicate: %v", err)
 	}
-	if _, err := e.svc.Authenticate(e.ctx, "alice", key); err != nil {
+	if _, err := e.svc.Authenticate(e.ctx, "alice", key, client); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -411,5 +419,220 @@ func TestHashFormat(t *testing.T) {
 	}
 	if want := "$argon2id$v=19$m=19456,t=2,p=1$"; h[:len(want)] != want {
 		t.Fatalf("hash = %s", h)
+	}
+}
+
+// limited — сервис с ограничителем на тех же часах.
+func limited(t *testing.T) *env {
+	t.Helper()
+	e := newEnv(t)
+	lim := ratelimit.New(slog.New(slog.NewJSONHandler(io.Discard, nil)), ratelimit.WithClock(e.clock.now))
+	e.svc = New(e.db, WithClock(e.clock.now), WithArgon2Params(TestArgon2Params), WithLimiter(lim))
+	return e
+}
+
+// block исчерпывает бюджет адреса a разными неверными ключами.
+func (e *env) block(t *testing.T, a netip.Addr) {
+	t.Helper()
+	for i := range ratelimit.MaxFails {
+		if _, err := e.svc.Authenticate(e.ctx, "alice", md5hex(fmt.Sprint("guess", i)), a); !errors.Is(err, ErrUnauthorized) {
+			t.Fatalf("guess %d: %v", i, err)
+		}
+	}
+}
+
+func isRateLimited(err error) bool {
+	var rl *RateLimitedError
+	return errors.As(err, &rl) && errors.Is(err, ErrRateLimited) && !errors.Is(err, ErrUnauthorized) && rl.RetryAfter > 0
+}
+
+func TestRateLimitBlockedAddress(t *testing.T) {
+	e := limited(t)
+	mustUser(t, e, "alice", RoleUser)
+	kindle := e.device(t, "alice", "Kindle")
+	kobo := e.device(t, "alice", "Kobo")
+	if _, err := e.svc.Authenticate(e.ctx, "alice", kindle, client); err != nil {
+		t.Fatal(err)
+	}
+	e.block(t, client)
+
+	// Незакешированный ключ, даже верный, с заблокированного адреса — без argon2.
+	before := e.svc.argonCalls.Load()
+	if _, err := e.svc.Authenticate(e.ctx, "alice", kobo, client); !isRateLimited(err) {
+		t.Fatalf("uncached key from blocked address: %v", err)
+	}
+	if _, err := e.svc.Authenticate(e.ctx, "ghost", kobo, client); !isRateLimited(err) {
+		t.Fatalf("unknown user from blocked address: %v", err)
+	}
+	if e.svc.argonCalls.Load() != before {
+		t.Fatal("argon2 ran for a blocked address")
+	}
+	// Закешированное устройство работает всю блокировку: попадания продлевают кеш.
+	for range 5 {
+		e.clock.t = e.clock.t.Add(5 * time.Minute)
+		if _, err := e.svc.Authenticate(e.ctx, "alice", kindle, client); err != nil {
+			t.Fatalf("cached device at +%v: %v", e.clock.t.Sub(time.Unix(1_700_000_000, 0)), err)
+		}
+	}
+	if e.svc.argonCalls.Load() != before {
+		t.Fatal("cache expired during active use")
+	}
+	// Другой адрес не затронут.
+	if _, err := e.svc.Authenticate(e.ctx, "alice", kobo, netip.MustParseAddr("192.0.2.2")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRateLimitRepeatedWrongKey(t *testing.T) {
+	e := limited(t)
+	mustUser(t, e, "alice", RoleUser)
+	kindle := e.device(t, "alice", "Kindle")
+	old := md5hex("revoked reader")
+	before := e.svc.argonCalls.Load()
+	for i := range 50 {
+		_, err := e.svc.Authenticate(e.ctx, "alice", old, client)
+		if !errors.Is(err, ErrUnauthorized) || isRateLimited(err) || errors.Is(err, ErrRepeated) != (i > 0) {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
+	}
+	if got := e.svc.argonCalls.Load() - before; got != 1 {
+		t.Fatalf("%d argon2 calls, want 1", got)
+	}
+	// Повтор не тратит бюджет: адрес не заблокирован, другая читалка входит.
+	if _, err := e.svc.Authenticate(e.ctx, "alice", kindle, client); err != nil {
+		t.Fatal(err)
+	}
+	// Неизвестный пользователь: повтор тоже отвечает ErrUnknownUser.
+	for range 3 {
+		if _, err := e.svc.Authenticate(e.ctx, "ghost", old, client); !errors.Is(err, ErrUnknownUser) || !errors.Is(err, ErrUnauthorized) {
+			t.Fatalf("ghost: %v", err)
+		}
+	}
+	// Запомненная неудача живёт cacheTTL.
+	e.clock.t = e.clock.t.Add(cacheTTL + time.Second)
+	before = e.svc.argonCalls.Load()
+	_, _ = e.svc.Authenticate(e.ctx, "alice", old, client)
+	if e.svc.argonCalls.Load() == before {
+		t.Fatal("rejected key remembered past TTL")
+	}
+}
+
+func TestRateLimitForgetOnCredentialChange(t *testing.T) {
+	e := limited(t)
+	mustUser(t, e, "alice", RoleUser)
+	kindle := e.device(t, "alice", "Kindle")
+	next := md5hex("next password")
+	if _, err := e.svc.Authenticate(e.ctx, "alice", next, client); !errors.Is(err, ErrUnauthorized) {
+		t.Fatal(err)
+	}
+	p, err := e.svc.Authenticate(e.ctx, "alice", kindle, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.RotateKey(e.ctx, p, next); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Authenticate(e.ctx, "alice", next, client); err != nil {
+		t.Fatalf("rotated to a previously rejected key: %v", err)
+	}
+
+	// Регистрация с ранее отвергнутым ключом.
+	key := md5hex("carol")
+	if _, err := e.svc.Authenticate(e.ctx, "carol", key, client); !errors.Is(err, ErrUnknownUser) {
+		t.Fatal(err)
+	}
+	if err := e.svc.CreateUserWithDevice(e.ctx, "carol", "KOReader", key, client); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Authenticate(e.ctx, "carol", key, client); err != nil {
+		t.Fatalf("registered with a previously rejected key: %v", err)
+	}
+}
+
+func TestRateLimitBudget(t *testing.T) {
+	e := limited(t)
+	mustUser(t, e, "alice", RoleUser)
+	mustUser(t, e, "dave", RoleUser)
+	kindle := e.device(t, "alice", "Kindle")
+	e.device(t, "dave", "Kindle")
+	if err := e.svc.DisableUser(e.ctx, "dave"); err != nil {
+		t.Fatal(err)
+	}
+	// Неизвестный и отключённый пользователь расходуют бюджет как неверный ключ.
+	for i := range ratelimit.MaxFails - 1 {
+		user := []string{"ghost", "dave", "alice"}[i%3]
+		if _, err := e.svc.Authenticate(e.ctx, user, md5hex(fmt.Sprint(i)), client); !errors.Is(err, ErrUnauthorized) {
+			t.Fatalf("%s: %v", user, err)
+		}
+	}
+	// Удачный незакешированный вход бюджет не тратит.
+	for range 3 {
+		e.svc.evict(cacheKey(1, kindle))
+		if _, err := e.svc.Authenticate(e.ctx, "alice", kindle, client); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.svc.Authenticate(e.ctx, "ghost", md5hex("last"), client); !errors.Is(err, ErrUnknownUser) {
+		t.Fatalf("10th failure: %v", err)
+	}
+	if _, err := e.svc.Authenticate(e.ctx, "dave", md5hex("one more"), client); !isRateLimited(err) {
+		t.Fatalf("11th failure: %v", err)
+	}
+}
+
+func TestRateLimitRegistration(t *testing.T) {
+	e := limited(t)
+	for i := range ratelimit.MaxFails {
+		if err := e.svc.CreateUserWithDevice(e.ctx, fmt.Sprint("user", i), "KOReader", md5hex("pw"), client); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := e.svc.argonCalls.Load()
+	if err := e.svc.CreateUserWithDevice(e.ctx, "user10", "KOReader", md5hex("pw"), client); !isRateLimited(err) {
+		t.Fatalf("11th registration: %v", err)
+	}
+	if e.svc.argonCalls.Load() != before {
+		t.Fatal("argon2 ran for a blocked registration")
+	}
+}
+
+func TestNoLimiterUnchanged(t *testing.T) {
+	e := newEnv(t)
+	mustUser(t, e, "alice", RoleUser)
+	e.device(t, "alice", "Kindle")
+	wrong := md5hex("wrong")
+	for i := range 3 * ratelimit.MaxFails {
+		before := e.svc.argonCalls.Load()
+		_, err := e.svc.Authenticate(e.ctx, "alice", wrong, client)
+		if !errors.Is(err, ErrUnauthorized) || isRateLimited(err) {
+			t.Fatalf("attempt %d: %v", i, err)
+		}
+		if e.svc.argonCalls.Load() == before {
+			t.Fatal("failure remembered without a limiter")
+		}
+	}
+}
+
+func TestDevicePasswordFormat(t *testing.T) {
+	re := regexp.MustCompile(`^[a-z2-7]{4}-[a-z2-7]{4}$`)
+	seen := map[string]bool{}
+	for range 100 {
+		p := newDevicePassword()
+		if !re.MatchString(p) {
+			t.Fatalf("password %q", p)
+		}
+		seen[p] = true
+	}
+	if len(seen) < 100 {
+		t.Fatal("repeated passwords")
+	}
+	// Пароль старого формата xxxx-xxxx-xxxx-xxxx по-прежнему проходит проверку.
+	e := newEnv(t)
+	old := KeyFromPassword("abcd-efgh-ijkl-mnop")
+	if err := e.svc.CreateUserWithDevice(e.ctx, "alice", "Kindle", old, client); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.Authenticate(e.ctx, "alice", old, client); err != nil {
+		t.Fatal(err)
 	}
 }

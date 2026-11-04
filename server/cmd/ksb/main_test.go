@@ -51,6 +51,15 @@ func TestCLI(t *testing.T) {
 	if out, code := ksb("device", "revoke", "alice", "Kindle"); code != 0 {
 		t.Fatalf("device revoke: %s", out)
 	}
+	if out, code := ksb("device", "add", "alice", "  Kobo  "); code != 0 || !strings.Contains(out, `device "Kobo" added`) {
+		t.Fatalf("device add with spaces: %d %s", code, out)
+	}
+	if out, code := ksb("device", "revoke", "alice", " Kobo"); code != 0 {
+		t.Fatalf("device revoke with spaces: %s", out)
+	}
+	if out, code := ksb("device", "add", "alice", strings.Repeat("ж", 65)); code != 1 || !strings.Contains(out, "device name") {
+		t.Fatalf("long device name: %d %s", code, out)
+	}
 	if out, _ := ksb("user", "list"); !strings.Contains(out, "alice") || !strings.Contains(out, "admin") {
 		t.Fatalf("user list: %s", out)
 	}

@@ -22,7 +22,7 @@ func TestSaveIsAtomic(t *testing.T) {
 	if _, err := acc.CreateUser(ctx, "alice", accounts.RoleUser); err != nil {
 		t.Fatal(err)
 	}
-	pass, err := acc.AddDevice(ctx, "alice", "Kindle")
+	_, pass, err := acc.AddDevice(ctx, "alice", "Kindle")
 	if err != nil {
 		t.Fatal(err)
 	}

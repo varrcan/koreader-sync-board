@@ -8,6 +8,9 @@ package apiv1
 import (
 	"fmt"
 	"net/http"
+	"time"
+
+	"github.com/oapi-codegen/runtime"
 )
 
 // Defines values for HealthStatus.
@@ -25,14 +28,14 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
-// Defines values for MeRole.
+// Defines values for Role.
 const (
-	Admin MeRole = "admin"
-	User  MeRole = "user"
+	Admin Role = "admin"
+	User  Role = "user"
 )
 
-// Valid indicates whether the value is a known member of the MeRole enum.
-func (e MeRole) Valid() bool {
+// Valid indicates whether the value is a known member of the Role enum.
+func (e Role) Valid() bool {
 	switch e {
 	case Admin:
 		return true
@@ -47,6 +50,49 @@ func (e MeRole) Valid() bool {
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
+}
+
+// CreateDeviceRequest defines model for CreateDeviceRequest.
+type CreateDeviceRequest struct {
+	// Name Пробелы по краям обрезаются; после обрезки 1–64 символа.
+	//
+	// Example: Kobo Clara
+	Name DeviceName `json:"name"`
+
+	// Username Владелец; по умолчанию — владелец сессии.
+	Username *string `json:"username,omitempty"`
+}
+
+// Device defines model for Device.
+type Device struct {
+	CreatedAt  time.Time  `json:"created_at"`
+	Id         int64      `json:"id"`
+	LastUsedAt *time.Time `json:"last_used_at"`
+	Name       string     `json:"name"`
+
+	// Owner Имя пользователя-владельца.
+	Owner string `json:"owner"`
+
+	// ReportedDevice Поле `device` последнего события прогресса этого устройства.
+	//
+	// Example: PocketBook 740
+	ReportedDevice *string    `json:"reported_device"`
+	RevokedAt      *time.Time `json:"revoked_at"`
+}
+
+// DeviceName Пробелы по краям обрезаются; после обрезки 1–64 символа.
+//
+// Example: Kobo Clara
+type DeviceName = string
+
+// DeviceWithPassword defines model for DeviceWithPassword.
+type DeviceWithPassword struct {
+	Device Device `json:"device"`
+
+	// Password Пароль для KOReader; больше нигде не показывается.
+	//
+	// Example: abcd-efgh
+	Password string `json:"password"`
 }
 
 // Error defines model for Error.
@@ -76,12 +122,20 @@ type LoginRequest struct {
 
 // Me defines model for Me.
 type Me struct {
-	Role     MeRole `json:"role"`
+	Role     Role   `json:"role"`
 	Username string `json:"username"`
 }
 
-// MeRole defines model for Me.Role.
-type MeRole string
+// RenameDeviceRequest defines model for RenameDeviceRequest.
+type RenameDeviceRequest struct {
+	// Name Пробелы по краям обрезаются; после обрезки 1–64 символа.
+	//
+	// Example: Kobo Clara
+	Name DeviceName `json:"name"`
+}
+
+// Role defines model for Role.
+type Role string
 
 // SetupRequest defines model for SetupRequest.
 type SetupRequest struct {
@@ -98,6 +152,13 @@ type SetupStatus struct {
 	Required bool `json:"required"`
 }
 
+// UserSummary defines model for UserSummary.
+type UserSummary struct {
+	Disabled bool   `json:"disabled"`
+	Role     Role   `json:"role"`
+	Username string `json:"username"`
+}
+
 // Version defines model for Version.
 type Version struct {
 	// Commit Example: 1a2b3c4
@@ -107,8 +168,20 @@ type Version struct {
 	Version string `json:"version"`
 }
 
+// DeviceID defines model for DeviceID.
+type DeviceID = int64
+
 // CrossOrigin defines model for CrossOrigin.
 type CrossOrigin = Error
+
+// DeviceExists defines model for DeviceExists.
+type DeviceExists = Error
+
+// Forbidden defines model for Forbidden.
+type Forbidden = Error
+
+// NotFound defines model for NotFound.
+type NotFound = Error
 
 // TooManyAttempts defines model for TooManyAttempts.
 type TooManyAttempts = Error
@@ -118,6 +191,12 @@ type Unauthorized = Error
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
+
+// CreateDeviceJSONRequestBody defines body for CreateDevice for application/json ContentType.
+type CreateDeviceJSONRequestBody = CreateDeviceRequest
+
+// RenameDeviceJSONRequestBody defines body for RenameDevice for application/json ContentType.
+type RenameDeviceJSONRequestBody = RenameDeviceRequest
 
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody = ChangePasswordRequest
@@ -133,6 +212,21 @@ type ServerInterface interface {
 	// Logout Выход
 	// (POST /api/v1/auth/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
+	// ListDevices Устройства
+	// (GET /api/v1/devices)
+	ListDevices(w http.ResponseWriter, r *http.Request)
+	// CreateDevice Создать устройство
+	// (POST /api/v1/devices)
+	CreateDevice(w http.ResponseWriter, r *http.Request)
+	// RevokeDevice Отозвать устройство
+	// (DELETE /api/v1/devices/{id})
+	RevokeDevice(w http.ResponseWriter, r *http.Request, id DeviceID)
+	// RenameDevice Переименовать устройство
+	// (PATCH /api/v1/devices/{id})
+	RenameDevice(w http.ResponseWriter, r *http.Request, id DeviceID)
+	// ResetDevicePassword Новый пароль устройства
+	// (POST /api/v1/devices/{id}/password)
+	ResetDevicePassword(w http.ResponseWriter, r *http.Request, id DeviceID)
 	// GetHealth Проверка работоспособности
 	// (GET /api/v1/health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -148,6 +242,9 @@ type ServerInterface interface {
 	// CompleteSetup Создать первого администратора
 	// (POST /api/v1/setup)
 	CompleteSetup(w http.ResponseWriter, r *http.Request)
+	// ListUsers Пользователи
+	// (GET /api/v1/users)
+	ListUsers(w http.ResponseWriter, r *http.Request)
 	// GetVersion Версия сборки
 	// (GET /api/v1/version)
 	GetVersion(w http.ResponseWriter, r *http.Request)
@@ -181,6 +278,112 @@ func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDevices operation middleware
+func (siw *ServerInterfaceWrapper) ListDevices(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDevices(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateDevice operation middleware
+func (siw *ServerInterfaceWrapper) CreateDevice(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDevice(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeDevice operation middleware
+func (siw *ServerInterfaceWrapper) RevokeDevice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id DeviceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeDevice(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RenameDevice operation middleware
+func (siw *ServerInterfaceWrapper) RenameDevice(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id DeviceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RenameDevice(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResetDevicePassword operation middleware
+func (siw *ServerInterfaceWrapper) ResetDevicePassword(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id DeviceID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResetDevicePassword(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -251,6 +454,20 @@ func (siw *ServerInterfaceWrapper) CompleteSetup(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CompleteSetup(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUsers operation middleware
+func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUsers(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -402,6 +619,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/me/password", wrapper.ChangePassword)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/setup", wrapper.GetSetup)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/setup", wrapper.CompleteSetup)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/devices", wrapper.ListDevices)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/devices", wrapper.CreateDevice)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/devices/{id}", wrapper.RevokeDevice)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/devices/{id}", wrapper.RenameDevice)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/devices/{id}/password", wrapper.ResetDevicePassword)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/users", wrapper.ListUsers)
 
 	return m
 }

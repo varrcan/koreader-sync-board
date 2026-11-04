@@ -61,6 +61,11 @@ export function errorText(t: TFunction, err: unknown): string {
     case "invalid_setup_code":
     case "setup_completed":
     case "cross_origin":
+    case "not_found":
+    case "user_not_found":
+    case "forbidden":
+    case "device_exists":
+    case "invalid_device_name":
       return t(`errors.${code}`);
     case "too_many_attempts": {
       const seconds = err instanceof ApiFailure ? (err.retryAfter ?? 900) : 900;

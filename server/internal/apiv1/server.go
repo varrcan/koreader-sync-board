@@ -157,7 +157,7 @@ func (s *Server) internal(w http.ResponseWriter, op string, err error) {
 }
 
 func me(u accounts.User) Me {
-	return Me{Username: u.Username, Role: MeRole(u.Role)}
+	return Me{Username: u.Username, Role: Role(u.Role)}
 }
 
 // decode читает JSON-тело в v; при ошибке отвечает 400 bad_request.

@@ -31,7 +31,7 @@ func TestVerifyPanelPassword(t *testing.T) {
 	if err := e.svc.DisableUser(e.ctx, "dave"); err != nil {
 		t.Fatal(err)
 	}
-	device, err := e.svc.AddDevice(e.ctx, "alice", "Kindle")
+	_, device, err := e.svc.AddDevice(e.ctx, "alice", "Kindle")
 	if err != nil {
 		t.Fatal(err)
 	}

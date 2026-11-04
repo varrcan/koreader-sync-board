@@ -65,7 +65,7 @@ func (e *env) cli(t *testing.T) *Service {
 
 func (e *env) device(t *testing.T, user, name string) string {
 	t.Helper()
-	pass, err := e.svc.AddDevice(e.ctx, user, name)
+	_, pass, err := e.svc.AddDevice(e.ctx, user, name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,10 +111,10 @@ func TestDevicesAuthenticate(t *testing.T) {
 	if kindle == kobo {
 		t.Fatal("same password for two devices")
 	}
-	if _, err := e.svc.AddDevice(e.ctx, "alice", "Kindle"); !errors.Is(err, ErrDeviceExists) {
+	if _, _, err := e.svc.AddDevice(e.ctx, "alice", "Kindle"); !errors.Is(err, ErrDeviceExists) {
 		t.Fatalf("duplicate device: %v", err)
 	}
-	if _, err := e.svc.AddDevice(e.ctx, "nobody", "Kindle"); !errors.Is(err, ErrNotFound) {
+	if _, _, err := e.svc.AddDevice(e.ctx, "nobody", "Kindle"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("device for unknown user: %v", err)
 	}
 
@@ -286,7 +286,7 @@ func TestDummyCheckForUnknownUser(t *testing.T) {
 func TestNoPlaintextKeys(t *testing.T) {
 	e := newEnv(t)
 	mustUser(t, e, "alice", RoleUser)
-	pass, err := e.svc.AddDevice(e.ctx, "alice", "Kindle")
+	_, pass, err := e.svc.AddDevice(e.ctx, "alice", "Kindle")
 	if err != nil {
 		t.Fatal(err)
 	}

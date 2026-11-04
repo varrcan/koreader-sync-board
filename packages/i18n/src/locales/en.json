@@ -13,7 +13,8 @@
   },
   "nav": {
     "home": "Home",
-    "password": "Change password"
+    "password": "Change password",
+    "devices": "Devices"
   },
   "roles": {
     "admin": "Administrator",
@@ -54,6 +55,74 @@
     "copy": "Copy",
     "copied": "Copied"
   },
+  "devices": {
+    "title": "Devices",
+    "description": "KOReader devices that sync reading progress with this server. Each one has its own password.",
+    "add": "Add device",
+    "loading": "Loading…",
+    "loadError": "Failed to load devices.",
+    "emptyTitle": "No devices yet",
+    "emptyText": "Add a reader: the panel will issue a password and show what to enter in KOReader.",
+    "revoked": "Revoked ({{count}})",
+    "revokedBadge": "revoked",
+    "notSynced": "Not synced yet",
+    "reportedHint": "How the device names itself in KOReader",
+    "created": "added {{date}}",
+    "lastUsed": "synced {{when}}",
+    "revokedAt": "revoked {{date}}",
+    "rename": "Rename",
+    "resetPassword": "New password",
+    "revoke": "Revoke",
+    "cancel": "Cancel",
+    "name": "Name",
+    "namePlaceholder": "Bedroom Kobo",
+    "nameHint": "Up to 64 characters. Shown only in the panel.",
+    "owner": "Owner",
+    "createDialog": {
+      "title": "New device",
+      "description": "The password is shown once, right after the device is created.",
+      "submit": "Create"
+    },
+    "renameDialog": {
+      "title": "Rename device",
+      "submit": "Save"
+    },
+    "revokeDialog": {
+      "title": "Revoke “{{name}}”?",
+      "description": "The reader stops syncing immediately; its reading history is kept. A revoked device cannot be restored: to connect the reader again, create a new one.",
+      "confirm": "Revoke"
+    },
+    "resetDialog": {
+      "title": "New password for “{{name}}”?",
+      "description": "The old password stops working immediately, and you will need to log in again in KOReader. The device name and history are kept.",
+      "confirm": "Issue password"
+    },
+    "passwordCard": {
+      "title": "Password for “{{name}}”",
+      "once": "This password is shown only now. Enter it in KOReader or save it in a password manager.",
+      "done": "Done"
+    },
+    "koreader": {
+      "title": "What to enter in KOReader",
+      "step1": "Open the tools tab (wrench icon) →",
+      "step2": "— enter the server address.",
+      "step3": "— enter the username and password, then tap",
+      "step4": "Turn on",
+      "step4Hint": "so the server knows book titles. The option is available in KOReader 2026.07 and later.",
+      "server": "Server address",
+      "serverHint": "The address this panel is open at. If the reader reaches the server at a different address, enter that one.",
+      "username": "Username",
+      "password": "Password",
+      "quote": "“{{label}}”",
+      "menu": {
+        "progressSync": "Progress sync",
+        "customServer": "Custom sync server",
+        "registerLogin": "Register / Login",
+        "login": "Login",
+        "sendMetadata": "Send document metadata"
+      }
+    }
+  },
   "errors": {
     "invalid_credentials": "Wrong username or password.",
     "invalid_current_password": "Wrong current password.",
@@ -63,6 +132,11 @@
     "setup_completed": "Setup is already complete: sign in to the panel.",
     "too_many_attempts": "Too many failed attempts. Try again in {{minutes}} min.",
     "cross_origin": "Request rejected: it came from another site.",
+    "not_found": "Device not found: it may have been revoked already.",
+    "user_not_found": "User not found: it may have been deleted.",
+    "forbidden": "You do not have permission to do this.",
+    "device_exists": "A device with this name already exists.",
+    "invalid_device_name": "The name must be 1 to 64 characters long.",
     "unknown": "The request failed. Please try again."
   }
 }

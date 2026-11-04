@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { meQuery, queryClient, safeRedirect, setupQuery } from "./auth";
 import { AppLayout } from "./components/AppLayout";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
+import { DevicesPage } from "./pages/DevicesPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { SetupPage } from "./pages/SetupPage";
@@ -65,13 +66,23 @@ const indexRoute = createRoute({
   component: HomePage,
 });
 
+const devicesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/devices",
+  component: DevicesPage,
+});
+
 const passwordRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/password",
   component: ChangePasswordPage,
 });
 
-const routeTree = rootRoute.addChildren([setupRoute, loginRoute, appRoute.addChildren([indexRoute, passwordRoute])]);
+const routeTree = rootRoute.addChildren([
+  setupRoute,
+  loginRoute,
+  appRoute.addChildren([indexRoute, devicesRoute, passwordRoute]),
+]);
 
 export const router = createRouter({ routeTree });
 

@@ -112,13 +112,13 @@ func deviceCmd(ctx context.Context, cfg config.Config, args []string, out io.Wri
 		}
 		user, name := args[0], args[1]
 		return withAccounts(ctx, cfg, func(s *accounts.Service) error {
-			pass, err := s.AddDevice(ctx, user, name)
+			d, pass, err := s.AddDevice(ctx, user, name)
 			if err != nil {
 				return err
 			}
 			fmt.Fprintf(out, "device %q added for %q\n\n  username: %s\n  password: %s\n\n"+
 				"The password is shown only once. Enter it in KOReader: Progress sync → Register / Login.\n",
-				name, user, user, pass)
+				d.Name, user, user, pass)
 			return nil
 		})
 	case "list":

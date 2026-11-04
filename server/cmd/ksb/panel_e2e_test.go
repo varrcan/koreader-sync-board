@@ -8,6 +8,8 @@ import (
 	"net/http/cookiejar"
 	"regexp"
 	"testing"
+
+	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
 )
 
 // panel — браузер панели со своим cookie jar и адресом за доверенным прокси.
@@ -104,4 +106,83 @@ func TestPanelE2E(t *testing.T) {
 		FindAllStringIndex(logs.String(), -1); len(n) != 10 {
 		t.Fatalf("%d panel failure lines:\n%s", len(n), logs)
 	}
+}
+
+// TestPanelDevicesE2E: устройство из панели → читалка синхронизируется →
+// панель видит, что она сообщила → новый пароль → отзыв администратором.
+func TestPanelDevicesE2E(t *testing.T) {
+	t.Setenv("KSB_DATA_DIR", t.TempDir())
+	t.Setenv("ADMIN_USER", "")
+	t.Setenv("ADMIN_PASSWORD", "")
+	panelPassword := func(args ...string) string {
+		t.Helper()
+		var out, errb bytes.Buffer
+		if code := run(append([]string{"user", "add"}, args...), &out, &errb); code != 0 {
+			t.Fatalf("user add: %s", errb.String())
+		}
+		if code := run([]string{"user", "passwd", args[0]}, &out, &errb); code != 0 {
+			t.Fatalf("user passwd: %s", errb.String())
+		}
+		m := regexp.MustCompile(`(?m)^  password: (\S+)$`).FindStringSubmatch(out.String())
+		if m == nil {
+			t.Fatalf("no panel password: %s", out.String())
+		}
+		return m[1]
+	}
+	alicePass, rootPass := panelPassword("alice"), panelPassword("root", "-role", "admin")
+	base, _ := startServer(t)
+
+	alice := newPanel(t, base, "198.51.100.30")
+	if code, body := alice.call("POST", "/api/v1/auth/login", map[string]string{"username": "alice", "password": alicePass}); code != 200 {
+		t.Fatalf("alice login: %d %v", code, body)
+	}
+	code, body := alice.call("POST", "/api/v1/devices", map[string]string{"name": "Kobo"})
+	if code != 201 {
+		t.Fatalf("create device: %d %v", code, body)
+	}
+	id := fmt.Sprintf("/api/v1/devices/%.0f", body["device"].(map[string]any)["id"])
+	kobo := reader{t: t, base: base, ip: "198.51.100.31", user: "alice", password: body["password"].(string)}
+	kobo.login().expect(t, "reader login", 200, "")
+	kobo.push(accounts.KeyFromPassword("e2e book"), 0.5).expect(t, "push", 200, "")
+
+	reported := func() any {
+		t.Helper()
+		res, err := alice.c.Get(base + "/api/v1/devices")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var list []map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&list); err != nil || len(list) != 1 {
+			t.Fatalf("list: %v %v", list, err)
+		}
+		return list[0]["reported_device"]
+	}
+	if r := reported(); r != "e2e" {
+		t.Fatalf("reported_device = %v", r)
+	}
+
+	code, body = alice.call("POST", id+"/password", nil)
+	if code != 200 {
+		t.Fatalf("reset: %d %v", code, body)
+	}
+	rotated := kobo
+	rotated.password = body["password"].(string)
+	unauthorized := func(name string, r reader) {
+		t.Helper()
+		if a := r.login(); a.status != 401 || a.body["code"] != float64(2001) {
+			t.Fatalf("%s: %+v", name, a)
+		}
+	}
+	unauthorized("old key after reset", kobo)
+	rotated.login().expect(t, "new key", 200, "")
+
+	root := newPanel(t, base, "198.51.100.32")
+	if code, _ := root.call("POST", "/api/v1/auth/login", map[string]string{"username": "root", "password": rootPass}); code != 200 {
+		t.Fatalf("root login: %d", code)
+	}
+	if code, body := root.call("DELETE", id, nil); code != 204 {
+		t.Fatalf("revoke: %d %v", code, body)
+	}
+	unauthorized("revoked", rotated)
 }

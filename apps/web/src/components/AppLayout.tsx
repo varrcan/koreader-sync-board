@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useRouter } from "@tanstack/react-router";
-import { House, KeyRound, LogOut } from "lucide-react";
+import { House, KeyRound, LogOut, TabletSmartphone } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "@/api";
@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { LanguageSelect } from "./LanguageSelect";
 import { Logo } from "./Logo";
 
-function NavLink({ to, icon, children }: { to: "/" | "/password"; icon: ReactNode; children: ReactNode }) {
+function NavLink({ to, icon, children }: { to: "/" | "/devices" | "/password"; icon: ReactNode; children: ReactNode }) {
   return (
     <Link
       to={to}
@@ -71,6 +71,9 @@ export function AppLayout() {
           <NavLink to="/" icon={<House />}>
             {t("nav.home")}
           </NavLink>
+          <NavLink to="/devices" icon={<TabletSmartphone />}>
+            {t("nav.devices")}
+          </NavLink>
           <NavLink to="/password" icon={<KeyRound />}>
             {t("nav.password")}
           </NavLink>
@@ -91,6 +94,11 @@ export function AppLayout() {
           </Link>
           <div className="flex items-center gap-1">
             <LanguageSelect />
+            <Button variant="ghost" size="icon-sm" asChild title={t("nav.devices")} aria-label={t("nav.devices")}>
+              <Link to="/devices" activeProps={{ className: "bg-accent text-foreground" }}>
+                <TabletSmartphone />
+              </Link>
+            </Button>
             <Button variant="ghost" size="icon-sm" asChild title={t("nav.password")} aria-label={t("nav.password")}>
               <Link to="/password">
                 <KeyRound />

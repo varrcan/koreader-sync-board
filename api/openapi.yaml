@@ -207,13 +207,206 @@ paths:
           $ref: "#/components/responses/TooManyAttempts"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/devices:
+    get:
+      operationId: listDevices
+      summary: Устройства
+      description: |
+        Свои устройства, включая отозванные; администратору — устройства всех
+        пользователей. Ключи и их хеши в ответ не попадают.
+      tags: [devices]
+      responses:
+        "200":
+          description: Устройства по владельцу и времени создания
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Device"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createDevice
+      summary: Создать устройство
+      description: |
+        Создаёт устройство и возвращает его пароль. Пароль показывается только в
+        этом ответе. Без `username` устройство создаётся владельцу сессии; другого
+        пользователя может указать только администратор.
+      tags: [devices]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDeviceRequest"
+      responses:
+        "201":
+          description: Устройство создано
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceWithPassword"
+        "400":
+          description: "`invalid_device_name` или `bad_request`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "`forbidden` (чужой `username` у не администратора) или `cross_origin`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "`user_not_found`: пользователя `username` нет"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          $ref: "#/components/responses/DeviceExists"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/devices/{id}:
+    parameters:
+      - $ref: "#/components/parameters/DeviceID"
+    patch:
+      operationId: renameDevice
+      summary: Переименовать устройство
+      description: Меняет имя действующего устройства; ключ остаётся прежним.
+      tags: [devices]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameDeviceRequest"
+      responses:
+        "200":
+          description: Устройство с новым именем
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "400":
+          description: "`invalid_device_name` или `bad_request`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/CrossOrigin"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/DeviceExists"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: revokeDevice
+      summary: Отозвать устройство
+      description: |
+        Ключ устройства перестаёт действовать сразу. Запись остаётся: на неё
+        ссылается журнал прогресса. Повторный отзыв не меняет время отзыва.
+      tags: [devices]
+      responses:
+        "204":
+          description: Устройство отозвано
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/CrossOrigin"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/devices/{id}/password:
+    parameters:
+      - $ref: "#/components/parameters/DeviceID"
+    post:
+      operationId: resetDevicePassword
+      summary: Новый пароль устройства
+      description: |
+        Выдаёт действующему устройству новый пароль и возвращает его один раз.
+        Старый ключ перестаёт действовать сразу; `id`, имя и история остаются.
+      tags: [devices]
+      responses:
+        "200":
+          description: Новый пароль
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceWithPassword"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/CrossOrigin"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/users:
+    get:
+      operationId: listUsers
+      summary: Пользователи
+      description: Только администратору — для выбора владельца нового устройства.
+      tags: [users]
+      responses:
+        "200":
+          description: Пользователи по имени
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserSummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
 components:
+  parameters:
+    DeviceID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
   headers:
     SessionCookie:
       description: "`ksb_session=…; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax` (`Secure` по HTTPS)"
       schema:
         type: string
   responses:
+    NotFound:
+      description: "`not_found`: устройства нет или оно недоступно владельцу сессии"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: "`forbidden`: операция только для администратора"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    DeviceExists:
+      description: "`device_exists`: у владельца есть действующее устройство с таким именем"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     Unauthorized:
       description: "`unauthorized`: нет действующей сессии"
       content:
@@ -272,6 +465,9 @@ components:
         message:
           type: string
           description: Описание для разработчика; пользователю показывается перевод по `code`.
+    Role:
+      type: string
+      enum: [admin, user]
     Me:
       type: object
       required: [username, role]
@@ -279,8 +475,7 @@ components:
         username:
           type: string
         role:
-          type: string
-          enum: [admin, user]
+          $ref: "#/components/schemas/Role"
     LoginRequest:
       type: object
       required: [username, password]
@@ -323,3 +518,70 @@ components:
           format: password
           minLength: 8
           maxLength: 256
+    DeviceName:
+      type: string
+      description: Пробелы по краям обрезаются; после обрезки 1–64 символа.
+      example: Kobo Clara
+    Device:
+      type: object
+      required: [id, name, owner, created_at, last_used_at, revoked_at, reported_device]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        owner:
+          type: string
+          description: Имя пользователя-владельца.
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        revoked_at:
+          type: string
+          format: date-time
+          nullable: true
+        reported_device:
+          type: string
+          nullable: true
+          description: Поле `device` последнего события прогресса этого устройства.
+          example: PocketBook 740
+    DeviceWithPassword:
+      type: object
+      required: [device, password]
+      properties:
+        device:
+          $ref: "#/components/schemas/Device"
+        password:
+          type: string
+          description: Пароль для KOReader; больше нигде не показывается.
+          example: abcd-efgh
+    CreateDeviceRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          $ref: "#/components/schemas/DeviceName"
+        username:
+          type: string
+          description: Владелец; по умолчанию — владелец сессии.
+    RenameDeviceRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          $ref: "#/components/schemas/DeviceName"
+    UserSummary:
+      type: object
+      required: [username, role, disabled]
+      properties:
+        username:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+        disabled:
+          type: boolean

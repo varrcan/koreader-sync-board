@@ -321,39 +321,6 @@ func (s *Service) DeleteUserByID(ctx context.Context, id int64) error {
 	return affected(res, err)
 }
 
-// AddDevice создаёт устройство и возвращает его пароль. Пароль больше нигде не
-// хранится и не может быть показан повторно.
-func (s *Service) AddDevice(ctx context.Context, username, name string) (string, error) {
-	if strings.TrimSpace(name) == "" {
-		return "", fmt.Errorf("%w: device name is empty", ErrInvalid)
-	}
-	password := GeneratePassword(2)
-	keyHash, err := s.hash(KeyFromPassword(password))
-	if err != nil {
-		return "", err
-	}
-	res, err := s.db.Write.ExecContext(ctx, `
-		INSERT INTO device_credentials (user_id, name, key_hash, created_at)
-		SELECT id, ?, ?, ? FROM users WHERE username = ?
-		ON CONFLICT DO NOTHING`,
-		name, keyHash, s.now().Unix(), username)
-	if err != nil {
-		return "", err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		var exists int
-		if err := s.db.Write.QueryRowContext(ctx, `SELECT count(*) FROM users WHERE username = ?`, username).Scan(&exists); err != nil {
-			return "", err
-		}
-		if exists == 0 {
-			return "", fmt.Errorf("user %q: %w", username, ErrNotFound)
-		}
-		return "", ErrDeviceExists
-	}
-	s.forgetRejected(username)
-	return password, nil
-}
-
 // GeneratePassword возвращает groups групп по 4 символа base32 в нижнем регистре
 // через дефис, по 20 бит на группу (не больше 6 групп). Пароль устройства — две
 // группы: его набирают на экранной клавиатуре читалки, а онлайн-подбор сдерживает
@@ -400,8 +367,19 @@ func (s *Service) ListDevices(ctx context.Context, username string) ([]Device, e
 	return out, rows.Err()
 }
 
-// RevokeDevice отзывает действующее устройство пользователя по имени.
+// RevokeDevice отзывает действующее устройство пользователя по имени. Сначала
+// ищется имя как есть: раньше имена сохранялись без обрезки, и « Kobo» из
+// старой базы иначе не отозвать. Не нашлось — имя обрезается так же, как при
+// создании.
 func (s *Service) RevokeDevice(ctx context.Context, username, name string) error {
+	err := s.revokeByName(ctx, username, name)
+	if trimmed := strings.TrimSpace(name); errors.Is(err, ErrNotFound) && trimmed != name {
+		err = s.revokeByName(ctx, username, trimmed)
+	}
+	return err
+}
+
+func (s *Service) revokeByName(ctx context.Context, username, name string) error {
 	res, err := s.db.Write.ExecContext(ctx, `
 		UPDATE device_credentials SET revoked_at = ?
 		WHERE revoked_at IS NULL AND name = ?

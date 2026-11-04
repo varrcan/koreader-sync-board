@@ -13,6 +13,9 @@ export type Version = Schemas["Version"];
 export type ApiError = Schemas["Error"];
 export type Me = Schemas["Me"];
 export type SetupStatus = Schemas["SetupStatus"];
+export type Device = Schemas["Device"];
+export type DeviceWithPassword = Schemas["DeviceWithPassword"];
+export type UserSummary = Schemas["UserSummary"];
 
 export type ApiClient = ReturnType<typeof createApiClient>;
 

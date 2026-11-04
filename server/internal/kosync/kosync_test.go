@@ -58,7 +58,7 @@ func newEnv(t *testing.T, opts Options) *env {
 			t.Fatal(err)
 		}
 		for _, d := range []string{"Kindle", "Kobo"} {
-			pass, err := acc.AddDevice(ctx, u, d)
+			_, pass, err := acc.AddDevice(ctx, u, d)
 			if err != nil {
 				t.Fatal(err)
 			}

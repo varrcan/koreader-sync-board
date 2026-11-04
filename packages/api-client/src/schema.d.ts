@@ -144,6 +144,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/devices": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Устройства
+         * @description Свои устройства, включая отозванные; администратору — устройства всех
+         *     пользователей. Ключи и их хеши в ответ не попадают.
+         */
+        get: operations["listDevices"];
+        put?: never;
+        /**
+         * Создать устройство
+         * @description Создаёт устройство и возвращает его пароль. Пароль показывается только в
+         *     этом ответе. Без `username` устройство создаётся владельцу сессии; другого
+         *     пользователя может указать только администратор.
+         */
+        post: operations["createDevice"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/devices/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["DeviceID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Отозвать устройство
+         * @description Ключ устройства перестаёт действовать сразу. Запись остаётся: на неё
+         *     ссылается журнал прогресса. Повторный отзыв не меняет время отзыва.
+         */
+        delete: operations["revokeDevice"];
+        options?: never;
+        head?: never;
+        /**
+         * Переименовать устройство
+         * @description Меняет имя действующего устройства; ключ остаётся прежним.
+         */
+        patch: operations["renameDevice"];
+        trace?: never;
+    };
+    "/api/v1/devices/{id}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["DeviceID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Новый пароль устройства
+         * @description Выдаёт действующему устройству новый пароль и возвращает его один раз.
+         *     Старый ключ перестаёт действовать сразу; `id`, имя и история остаются.
+         */
+        post: operations["resetDevicePassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Пользователи
+         * @description Только администратору — для выбора владельца нового устройства.
+         */
+        get: operations["listUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -167,10 +264,11 @@ export interface components {
             /** @description Описание для разработчика; пользователю показывается перевод по `code`. */
             message: string;
         };
+        /** @enum {string} */
+        Role: "admin" | "user";
         Me: {
             username: string;
-            /** @enum {string} */
-            role: "admin" | "user";
+            role: components["schemas"]["Role"];
         };
         LoginRequest: {
             username: string;
@@ -196,8 +294,79 @@ export interface components {
             /** Format: password */
             password: string;
         };
+        /**
+         * @description Пробелы по краям обрезаются; после обрезки 1–64 символа.
+         * @example Kobo Clara
+         */
+        DeviceName: string;
+        Device: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /** @description Имя пользователя-владельца. */
+            owner: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_used_at: string | null;
+            /** Format: date-time */
+            revoked_at: string | null;
+            /**
+             * @description Поле `device` последнего события прогресса этого устройства.
+             * @example PocketBook 740
+             */
+            reported_device: string | null;
+        };
+        DeviceWithPassword: {
+            device: components["schemas"]["Device"];
+            /**
+             * @description Пароль для KOReader; больше нигде не показывается.
+             * @example abcd-efgh
+             */
+            password: string;
+        };
+        CreateDeviceRequest: {
+            name: components["schemas"]["DeviceName"];
+            /** @description Владелец; по умолчанию — владелец сессии. */
+            username?: string;
+        };
+        RenameDeviceRequest: {
+            name: components["schemas"]["DeviceName"];
+        };
+        UserSummary: {
+            username: string;
+            role: components["schemas"]["Role"];
+            disabled: boolean;
+        };
     };
     responses: {
+        /** @description `not_found`: устройства нет или оно недоступно владельцу сессии */
+        NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description `forbidden`: операция только для администратора */
+        Forbidden: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description `device_exists`: у владельца есть действующее устройство с таким именем */
+        DeviceExists: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description `unauthorized`: нет действующей сессии */
         Unauthorized: {
             headers: {
@@ -237,7 +406,9 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        DeviceID: number;
+    };
     requestBodies: never;
     headers: {
         /** @description `ksb_session=…; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax` (`Secure` по HTTPS) */
@@ -484,6 +655,195 @@ export interface operations {
                 };
             };
             429: components["responses"]["TooManyAttempts"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listDevices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Устройства по владельцу и времени создания */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Device"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDeviceRequest"];
+            };
+        };
+        responses: {
+            /** @description Устройство создано */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceWithPassword"];
+                };
+            };
+            /** @description `invalid_device_name` или `bad_request` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` (чужой `username` у не администратора) или `cross_origin` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `user_not_found`: пользователя `username` нет */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            409: components["responses"]["DeviceExists"];
+            default: components["responses"]["Error"];
+        };
+    };
+    revokeDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["DeviceID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Устройство отозвано */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["CrossOrigin"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
+    renameDevice: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["DeviceID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameDeviceRequest"];
+            };
+        };
+        responses: {
+            /** @description Устройство с новым именем */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Device"];
+                };
+            };
+            /** @description `invalid_device_name` или `bad_request` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["CrossOrigin"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["DeviceExists"];
+            default: components["responses"]["Error"];
+        };
+    };
+    resetDevicePassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["DeviceID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Новый пароль */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceWithPassword"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["CrossOrigin"];
+            404: components["responses"]["NotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Пользователи по имени */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserSummary"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             default: components["responses"]["Error"];
         };
     };

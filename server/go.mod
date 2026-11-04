@@ -5,12 +5,14 @@ go 1.27.0
 toolchain go1.27.3
 
 require (
-	golang.org/x/crypto v0.0.0-20200622213623-75b288015ac9
+	github.com/oapi-codegen/runtime v1.8.0
+	golang.org/x/crypto v0.46.0
 	golang.org/x/text v0.43.0
 	modernc.org/sqlite v1.61.0
 )
 
 require (
+	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
 	github.com/dprotaso/go-yit v0.0.0-20220510233725-9ba8df137936 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/getkin/kin-openapi v0.142.0 // indirect

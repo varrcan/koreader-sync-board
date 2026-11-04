@@ -43,6 +43,7 @@ type env struct {
 	t     *testing.T
 	ctx   context.Context
 	url   string
+	db    *store.DB
 	acc   *accounts.Service
 	setup *panelauth.Setup
 	logs  *lockedBuffer
@@ -63,7 +64,7 @@ func newEnv(t *testing.T) *env {
 	setup := panelauth.NewSetup(acc, lim)
 	srv := httptest.NewServer(NewHandler(&Server{Accounts: acc, Auth: panelauth.New(acc, nil, log), Setup: setup, Log: log}))
 	t.Cleanup(srv.Close)
-	return &env{t: t, ctx: ctx, url: srv.URL, acc: acc, setup: setup, logs: logs}
+	return &env{t: t, ctx: ctx, url: srv.URL, db: db, acc: acc, setup: setup, logs: logs}
 }
 
 // browser — клиент со своим cookie jar.
@@ -82,6 +83,7 @@ type resp struct {
 	status int
 	header http.Header
 	body   map[string]any
+	items  []any // тело-массив
 }
 
 func (b *browser) do(method, path string, body any) resp {
@@ -103,7 +105,10 @@ func (b *browser) do(method, path string, body any) resp {
 	}
 	defer res.Body.Close()
 	r := resp{status: res.StatusCode, header: res.Header}
-	_ = json.NewDecoder(res.Body).Decode(&r.body)
+	var v any
+	_ = json.NewDecoder(res.Body).Decode(&v)
+	r.body, _ = v.(map[string]any)
+	r.items, _ = v.([]any)
 	return r
 }
 

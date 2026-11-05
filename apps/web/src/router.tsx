@@ -3,7 +3,10 @@ import { createRootRoute, createRoute, createRouter, Outlet, redirect } from "@t
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { meQuery, queryClient, safeRedirect, setupQuery } from "./auth";
+import type { BookFilter } from "@ksb/api-client";
 import { AppLayout } from "./components/AppLayout";
+import { BookPage } from "./pages/BookPage";
+import { BooksPage } from "./pages/BooksPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { DevicesPage } from "./pages/DevicesPage";
 import { HomePage } from "./pages/HomePage";
@@ -66,6 +69,25 @@ const indexRoute = createRoute({
   component: HomePage,
 });
 
+const bookFilters: readonly string[] = ["reading", "finished", "unknown"] satisfies BookFilter[];
+
+const booksRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/books",
+  // Неизвестный фильтр в адресе — просто все книги, а не 400 от сервера.
+  validateSearch: (search: Record<string, unknown>): { filter?: BookFilter } =>
+    typeof search.filter === "string" && bookFilters.includes(search.filter)
+      ? { filter: search.filter as BookFilter }
+      : {},
+  component: BooksPage,
+});
+
+const bookRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/books/$hash",
+  component: BookPage,
+});
+
 const devicesRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/devices",
@@ -81,7 +103,7 @@ const passwordRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   setupRoute,
   loginRoute,
-  appRoute.addChildren([indexRoute, devicesRoute, passwordRoute]),
+  appRoute.addChildren([indexRoute, booksRoute, bookRoute, devicesRoute, passwordRoute]),
 ]);
 
 export const router = createRouter({ routeTree });

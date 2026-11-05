@@ -238,6 +238,9 @@ pnpm -F web dev            # dev server for the panel, proxies /api to :8080
 Layout: `server/` (Go module), `apps/web` (Vite + React), `packages/api-client`
 (generated from `api/openapi.yaml`), `packages/i18n` (ru/en).
 
+Before touching the sync endpoints, read [docs/koreader-compat.md](docs/koreader-compat.md):
+error order and codes, document hashes, and quirks of KOReader and CrossPoint clients.
+
 ## License
 
 [AGPL-3.0](LICENSE)

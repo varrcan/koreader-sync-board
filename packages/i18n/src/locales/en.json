@@ -3,16 +3,12 @@
     "title": "KOReader Sync Board",
     "brand": "sync board"
   },
-  "version": {
-    "label": "Version {{version}} (commit {{commit}})",
-    "loading": "Loading…",
-    "loadError": "Failed to fetch server version"
-  },
   "language": {
     "label": "Language"
   },
   "nav": {
     "home": "Home",
+    "books": "Books",
     "password": "Change password",
     "devices": "Devices"
   },
@@ -122,6 +118,72 @@
         "sendMetadata": "Send document metadata"
       }
     }
+  },
+  "common": {
+    "loading": "Loading…",
+    "loadError": "Could not load data.",
+    "loadMore": "Show more"
+  },
+  "home": {
+    "reading": "Reading now",
+    "earlier": "Started earlier",
+    "allBooks": "All unfinished →",
+    "syncs": "Syncs",
+    "empty": {
+      "title": "The server is ready. The shelf is empty for now",
+      "text": "Books and progress will appear here after the first sync from a reader. No plugins needed — KOReader's built-in sync is enough.",
+      "step1Title": "Add a device",
+      "step1Text": "The server issues a short password that is easy to type on a reader.",
+      "step1Done": "You already have a device. If its password is lost, issue a new one on the devices page.",
+      "addDevice": "Add device",
+      "openDevices": "Devices",
+      "step2Title": "Set up KOReader",
+      "step2Path": "Tools tab (wrench icon) →",
+      "step2Address": "— enter the address:",
+      "step2Login": "Then, in the same menu —",
+      "step2User": "username",
+      "step2Password": "and the device password from step 1.",
+      "metadataTitle": "Turn on",
+      "metadataText": "Without it, books arrive without titles and authors, as unknown books. The option is available in KOReader 2026.07 and later.",
+      "step3Title": "Open a book and turn a few pages",
+      "step3Text": "Progress is sent when you close the book or run sync manually."
+    }
+  },
+  "books": {
+    "title": "Books",
+    "description": "Books that sent reading progress, most recently synced first.",
+    "filters": {
+      "all": "All",
+      "reading": "Reading",
+      "finished": "Finished",
+      "unknown": "Unknown"
+    },
+    "empty": {
+      "all": "No books yet: they will appear after the first sync from a reader.",
+      "reading": "No unfinished books.",
+      "finished": "No finished books yet.",
+      "unknown": "No unknown books — every book has a title."
+    },
+    "unknown": "Unknown book",
+    "finished": "finished"
+  },
+  "book": {
+    "back": "Books",
+    "notFound": "Book not found",
+    "notFoundText": "This book is not among yours: no progress was received for it.",
+    "file": "File",
+    "hash": "Document hash",
+    "devices": "By device",
+    "history": "Sync history",
+    "lastSync": "{{device}} · {{when}}",
+    "unknownTitle": "The title will appear once you turn on",
+    "unknownText": "KOReader will send the title, authors and file name with the next sync. The option is available in KOReader 2026.07 and later."
+  },
+  "feed": {
+    "today": "Today",
+    "yesterday": "Yesterday",
+    "empty": "No syncs yet.",
+    "syncs": "Syncs: {{count}}"
   },
   "errors": {
     "invalid_credentials": "Wrong username or password.",

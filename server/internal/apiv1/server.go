@@ -9,6 +9,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
 	"github.com/varrcan/koreader-sync-board/server/internal/buildinfo"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
+	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 )
 
 // maxBodyBytes ограничивает тело запроса: формы панели — сотни байт.
@@ -19,6 +20,7 @@ type Server struct {
 	Accounts *accounts.Service
 	Auth     *panelauth.Auth
 	Setup    *panelauth.Setup
+	Progress *progress.Store
 	Log      *slog.Logger
 }
 

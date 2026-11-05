@@ -241,6 +241,73 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/books": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Книги
+         * @description Книги владельца сессии (в том числе администратора — только свои): по одной на
+         *     документ, по которому есть прогресс, от последней синхронизации к более ранним.
+         *     Счётчики считаются по всем книгам пользователя независимо от фильтра и страницы.
+         */
+        get: operations["listBooks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/books/{hash}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Хеш документа, как его прислала читалка. */
+                hash: components["parameters"]["BookHash"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Книга
+         * @description Книга и последнее состояние на каждом устройстве, с которого она синхронизировалась.
+         */
+        get: operations["getBook"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/activity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Лента активности
+         * @description Синхронизации владельца сессии, свёрнутые в записи: подряд идущие синхронизации
+         *     одного документа с одного устройства с паузами меньше 30 минут — одна запись.
+         *     Время — время получения сервером.
+         */
+        get: operations["listActivity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -338,10 +405,111 @@ export interface components {
             role: components["schemas"]["Role"];
             disabled: boolean;
         };
+        /** @enum {string} */
+        BookFilter: "reading" | "finished" | "unknown";
+        Book: {
+            /** @example 0123456789abcdef0123456789abcdef */
+            hash: string;
+            /** @description Из `metadata` синхронизаций этого пользователя. */
+            title: string | null;
+            authors: string | null;
+            filename: string | null;
+            /**
+             * Format: double
+             * @description Последний присланный процент, 0–1.
+             * @example 0.624
+             */
+            percentage: number;
+            /** @description Процент при показе с одним знаком округляется до 100 % (≥ 0,9995). */
+            finished: boolean;
+            /**
+             * Format: date-time
+             * @description Время получения последней синхронизации.
+             */
+            updated_at: string;
+            /** @description Имя устройства последней синхронизации в панели; `null`, если устройство удалено. */
+            device_name: string | null;
+            /**
+             * @description Поле `device` последней синхронизации как есть.
+             * @example PocketBook 740
+             */
+            reported_device: string;
+        };
+        BookCounts: {
+            all: number;
+            reading: number;
+            finished: number;
+            unknown: number;
+        };
+        BookPage: {
+            items: components["schemas"]["Book"][];
+            /** @description `null` на последней странице. */
+            next_cursor: string | null;
+            counts: components["schemas"]["BookCounts"];
+        };
+        BookDevice: {
+            device_name: string | null;
+            reported_device: string;
+            /** Format: double */
+            percentage: number;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        BookDetail: {
+            book: components["schemas"]["Book"];
+            devices: components["schemas"]["BookDevice"][];
+        };
+        ActivityItem: {
+            hash: string;
+            title: string | null;
+            authors: string | null;
+            filename: string | null;
+            /** @description По последней синхронизации записи. */
+            device_name: string | null;
+            reported_device: string;
+            /**
+             * Format: double
+             * @description Процент первой синхронизации записи.
+             */
+            from_percentage: number;
+            /**
+             * Format: double
+             * @description Процент последней синхронизации записи.
+             */
+            to_percentage: number;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            ended_at: string;
+            /** @description Число синхронизаций в записи. */
+            syncs: number;
+        };
+        ActivityPage: {
+            items: components["schemas"]["ActivityItem"][];
+            next_cursor: string | null;
+        };
     };
     responses: {
         /** @description `not_found`: устройства нет или оно недоступно владельцу сессии */
         NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description `not_found`: у владельца сессии нет прогресса по этому документу */
+        BookNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description `bad_request`: неверный параметр запроса */
+        BadRequest: {
             headers: {
                 [name: string]: unknown;
             };
@@ -408,6 +576,12 @@ export interface components {
     };
     parameters: {
         DeviceID: number;
+        /** @description Хеш документа, как его прислала читалка. */
+        BookHash: string;
+        /** @description Размер страницы. */
+        Limit: number;
+        /** @description `next_cursor` предыдущей страницы; клиент его не разбирает. */
+        Cursor: string;
     };
     requestBodies: never;
     headers: {
@@ -844,6 +1018,97 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBooks: {
+        parameters: {
+            query?: {
+                /**
+                 * @description `reading` — не прочитанные, `finished` — прочитанные (процент при показе с одним
+                 *     знаком округляется до 100 %), `unknown` — без названия и имени файла. Без
+                 *     параметра — все книги.
+                 */
+                filter?: components["schemas"]["BookFilter"];
+                /** @description Размер страницы. */
+                limit?: components["parameters"]["Limit"];
+                /** @description `next_cursor` предыдущей страницы; клиент его не разбирает. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница книг */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getBook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Хеш документа, как его прислала читалка. */
+                hash: components["parameters"]["BookHash"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Книга и устройства от последней синхронизации к более ранним */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["BookNotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listActivity: {
+        parameters: {
+            query?: {
+                /** @description Хеш документа — лента одной книги. */
+                document?: string;
+                /** @description Размер страницы. */
+                limit?: components["parameters"]["Limit"];
+                /** @description `next_cursor` предыдущей страницы; клиент его не разбирает. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница ленты от последней синхронизации к более ранним */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivityPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["BookNotFound"];
             default: components["responses"]["Error"];
         };
     };

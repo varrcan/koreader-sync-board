@@ -16,6 +16,14 @@ export type SetupStatus = Schemas["SetupStatus"];
 export type Device = Schemas["Device"];
 export type DeviceWithPassword = Schemas["DeviceWithPassword"];
 export type UserSummary = Schemas["UserSummary"];
+export type BookFilter = Schemas["BookFilter"];
+export type Book = Schemas["Book"];
+export type BookCounts = Schemas["BookCounts"];
+export type BookPage = Schemas["BookPage"];
+export type BookDevice = Schemas["BookDevice"];
+export type BookDetail = Schemas["BookDetail"];
+export type ActivityItem = Schemas["ActivityItem"];
+export type ActivityPage = Schemas["ActivityPage"];
 
 export type ApiClient = ReturnType<typeof createApiClient>;
 

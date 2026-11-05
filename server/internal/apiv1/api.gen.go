@@ -6,12 +6,34 @@
 package apiv1
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/oapi-codegen/runtime"
 )
+
+// Defines values for BookFilter.
+const (
+	Finished BookFilter = "finished"
+	Reading  BookFilter = "reading"
+	Unknown  BookFilter = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the BookFilter enum.
+func (e BookFilter) Valid() bool {
+	switch e {
+	case Finished:
+		return true
+	case Reading:
+		return true
+	case Unknown:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for HealthStatus.
 const (
@@ -44,6 +66,100 @@ func (e Role) Valid() bool {
 	default:
 		return false
 	}
+}
+
+// ActivityItem defines model for ActivityItem.
+type ActivityItem struct {
+	Authors *string `json:"authors"`
+
+	// DeviceName По последней синхронизации записи.
+	DeviceName *string   `json:"device_name"`
+	EndedAt    time.Time `json:"ended_at"`
+	Filename   *string   `json:"filename"`
+
+	// FromPercentage Процент первой синхронизации записи.
+	FromPercentage float64   `json:"from_percentage"`
+	Hash           string    `json:"hash"`
+	ReportedDevice string    `json:"reported_device"`
+	StartedAt      time.Time `json:"started_at"`
+
+	// Syncs Число синхронизаций в записи.
+	Syncs int     `json:"syncs"`
+	Title *string `json:"title"`
+
+	// ToPercentage Процент последней синхронизации записи.
+	ToPercentage float64 `json:"to_percentage"`
+}
+
+// ActivityPage defines model for ActivityPage.
+type ActivityPage struct {
+	Items      []ActivityItem `json:"items"`
+	NextCursor *string        `json:"next_cursor"`
+}
+
+// Book defines model for Book.
+type Book struct {
+	Authors *string `json:"authors"`
+
+	// DeviceName Имя устройства последней синхронизации в панели; `null`, если устройство удалено.
+	DeviceName *string `json:"device_name"`
+	Filename   *string `json:"filename"`
+
+	// Finished Процент при показе с одним знаком округляется до 100 % (≥ 0,9995).
+	Finished bool `json:"finished"`
+
+	// Hash Example: 0123456789abcdef0123456789abcdef
+	Hash string `json:"hash"`
+
+	// Percentage Последний присланный процент, 0–1.
+	//
+	// Example: 0.624
+	Percentage float64 `json:"percentage"`
+
+	// ReportedDevice Поле `device` последней синхронизации как есть.
+	//
+	// Example: PocketBook 740
+	ReportedDevice string `json:"reported_device"`
+
+	// Title Из `metadata` синхронизаций этого пользователя.
+	Title *string `json:"title"`
+
+	// UpdatedAt Время получения последней синхронизации.
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// BookCounts defines model for BookCounts.
+type BookCounts struct {
+	All      int `json:"all"`
+	Finished int `json:"finished"`
+	Reading  int `json:"reading"`
+	Unknown  int `json:"unknown"`
+}
+
+// BookDetail defines model for BookDetail.
+type BookDetail struct {
+	Book    Book         `json:"book"`
+	Devices []BookDevice `json:"devices"`
+}
+
+// BookDevice defines model for BookDevice.
+type BookDevice struct {
+	DeviceName     *string   `json:"device_name"`
+	Percentage     float64   `json:"percentage"`
+	ReportedDevice string    `json:"reported_device"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// BookFilter defines model for BookFilter.
+type BookFilter string
+
+// BookPage defines model for BookPage.
+type BookPage struct {
+	Counts BookCounts `json:"counts"`
+	Items  []Book     `json:"items"`
+
+	// NextCursor `null` на последней странице.
+	NextCursor *string `json:"next_cursor"`
 }
 
 // ChangePasswordRequest defines model for ChangePasswordRequest.
@@ -168,8 +284,23 @@ type Version struct {
 	Version string `json:"version"`
 }
 
+// BookHash defines model for BookHash.
+type BookHash = string
+
+// Cursor defines model for Cursor.
+type Cursor = string
+
 // DeviceID defines model for DeviceID.
 type DeviceID = int64
+
+// Limit defines model for Limit.
+type Limit = int
+
+// BadRequest defines model for BadRequest.
+type BadRequest = Error
+
+// BookNotFound defines model for BookNotFound.
+type BookNotFound = Error
 
 // CrossOrigin defines model for CrossOrigin.
 type CrossOrigin = Error
@@ -189,6 +320,32 @@ type TooManyAttempts = Error
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = Error
 
+// ListActivityParams defines parameters for ListActivity.
+type ListActivityParams struct {
+	// Document Хеш документа — лента одной книги.
+	Document *string `form:"document,omitempty" json:"document,omitempty"`
+
+	// Limit Размер страницы.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor `next_cursor` предыдущей страницы; клиент его не разбирает.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListBooksParams defines parameters for ListBooks.
+type ListBooksParams struct {
+	// Filter `reading` — не прочитанные, `finished` — прочитанные (процент при показе с одним
+	// знаком округляется до 100 %), `unknown` — без названия и имени файла. Без
+	// параметра — все книги.
+	Filter *BookFilter `form:"filter,omitempty" json:"filter,omitempty"`
+
+	// Limit Размер страницы.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor `next_cursor` предыдущей страницы; клиент его не разбирает.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
@@ -206,12 +363,21 @@ type CompleteSetupJSONRequestBody = SetupRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListActivity Лента активности
+	// (GET /api/v1/activity)
+	ListActivity(w http.ResponseWriter, r *http.Request, params ListActivityParams)
 	// Login Вход в панель
 	// (POST /api/v1/auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
 	// Logout Выход
 	// (POST /api/v1/auth/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
+	// ListBooks Книги
+	// (GET /api/v1/books)
+	ListBooks(w http.ResponseWriter, r *http.Request, params ListBooksParams)
+	// GetBook Книга
+	// (GET /api/v1/books/{hash})
+	GetBook(w http.ResponseWriter, r *http.Request, hash BookHash)
 	// ListDevices Устройства
 	// (GET /api/v1/devices)
 	ListDevices(w http.ResponseWriter, r *http.Request)
@@ -259,6 +425,65 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.Handler) http.Handler
 
+// ListActivity operation middleware
+func (siw *ServerInterfaceWrapper) ListActivity(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListActivityParams
+
+	// ------------- Optional query parameter "document" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "document", r.URL.Query(), &params.Document, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "document"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "document", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListActivity(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // Login operation middleware
 func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
 
@@ -278,6 +503,91 @@ func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListBooks operation middleware
+func (siw *ServerInterfaceWrapper) ListBooks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListBooksParams
+
+	// ------------- Optional query parameter "filter" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "filter", r.URL.Query(), &params.Filter, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "filter"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "filter", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListBooks(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetBook operation middleware
+func (siw *ServerInterfaceWrapper) GetBook(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "hash" -------------
+	var hash BookHash
+
+	err = runtime.BindStyledParameterWithOptions("simple", "hash", r.PathValue("hash"), &hash, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hash", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetBook(w, r, hash)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -625,6 +935,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/devices/{id}", wrapper.RenameDevice)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/devices/{id}/password", wrapper.ResetDevicePassword)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/users", wrapper.ListUsers)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books", wrapper.ListBooks)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books/{hash}", wrapper.GetBook)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/activity", wrapper.ListActivity)
 
 	return m
 }

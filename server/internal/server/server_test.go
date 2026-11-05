@@ -15,6 +15,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/apiv1"
 	"github.com/varrcan/koreader-sync-board/server/internal/buildinfo"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
+	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
 	"github.com/varrcan/koreader-sync-board/server/internal/web"
 )
@@ -39,7 +40,8 @@ func newTestServer(t *testing.T) http.Handler {
 	acc := accounts.New(db, accounts.WithArgon2Params(accounts.TestArgon2Params))
 	log := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	api := apiv1.NewHandler(&apiv1.Server{
-		Accounts: acc, Auth: panelauth.New(acc, nil, log), Setup: panelauth.NewSetup(acc, nil), Log: log,
+		Accounts: acc, Auth: panelauth.New(acc, nil, log), Setup: panelauth.NewSetup(acc, nil),
+		Progress: progress.New(db), Log: log,
 	})
 	return New(Handlers{Kosync: tag("kosync"), API: api, Web: web.Handler()})
 }

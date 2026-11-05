@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useRouter } from "@tanstack/react-router";
-import { House, KeyRound, LogOut, TabletSmartphone } from "lucide-react";
+import { BookOpen, House, KeyRound, LogOut, TabletSmartphone } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "@/api";
@@ -9,13 +9,22 @@ import { Button } from "@/components/ui/button";
 import { LanguageSelect } from "./LanguageSelect";
 import { Logo } from "./Logo";
 
-function NavLink({ to, icon, children }: { to: "/" | "/devices" | "/password"; icon: ReactNode; children: ReactNode }) {
+function NavLink({
+  to,
+  icon,
+  children,
+}: {
+  to: "/" | "/books" | "/devices" | "/password";
+  icon: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <Link
       to={to}
       className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground [&_svg]:size-4.5"
       activeProps={{ className: "bg-accent font-medium text-foreground" }}
-      activeOptions={{ exact: true }}
+      // «Книги» подсвечены и в карточке книги.
+      activeOptions={{ exact: to === "/", includeSearch: false }}
     >
       {icon}
       {children}
@@ -71,6 +80,9 @@ export function AppLayout() {
           <NavLink to="/" icon={<House />}>
             {t("nav.home")}
           </NavLink>
+          <NavLink to="/books" icon={<BookOpen />}>
+            {t("nav.books")}
+          </NavLink>
           <NavLink to="/devices" icon={<TabletSmartphone />}>
             {t("nav.devices")}
           </NavLink>
@@ -94,6 +106,15 @@ export function AppLayout() {
           </Link>
           <div className="flex items-center gap-1">
             <LanguageSelect />
+            <Button variant="ghost" size="icon-sm" asChild title={t("nav.books")} aria-label={t("nav.books")}>
+              <Link
+                to="/books"
+                activeOptions={{ includeSearch: false }}
+                activeProps={{ className: "bg-accent text-foreground" }}
+              >
+                <BookOpen />
+              </Link>
+            </Button>
             <Button variant="ghost" size="icon-sm" asChild title={t("nav.devices")} aria-label={t("nav.devices")}>
               <Link to="/devices" activeProps={{ className: "bg-accent text-foreground" }}>
                 <TabletSmartphone />

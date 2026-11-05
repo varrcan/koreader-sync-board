@@ -4,8 +4,8 @@ import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, failure } from "@/api";
 import { errorText, queryClient } from "@/auth";
-import { CopyButton } from "@/components/CopyButton";
 import { FormError } from "@/components/FormError";
+import { MenuLabel, Value } from "@/components/KoreaderSetup";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -255,44 +255,6 @@ export function ConfirmDeviceDialog({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  );
-}
-
-// Подписи меню KOReader. Пользователь ищет их в меню читалки на её языке,
-// поэтому рядом с переводом из локали KOReader всегда стоит английский оригинал.
-const koreaderMenu = {
-  progressSync: "Progress sync",
-  customServer: "Custom sync server",
-  registerLogin: "Register / Login",
-  login: "Login",
-  sendMetadata: "Send document metadata",
-} as const;
-
-function MenuLabel({ item }: { item: keyof typeof koreaderMenu }) {
-  const { t } = useTranslation();
-  const local = t(`devices.koreader.menu.${item}`);
-  const original = koreaderMenu[item];
-  return (
-    <span className="font-medium text-foreground">
-      {t("devices.koreader.quote", { label: local })}
-      {local !== original && <span className="font-normal text-muted-foreground"> ({original})</span>}
-    </span>
-  );
-}
-
-function Value({ label, value, large }: { label: string; value: string; large?: boolean }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
-      <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg bg-muted py-2 pr-2 pl-3">
-        <code
-          className={`overflow-x-auto font-mono whitespace-nowrap ${large ? "text-lg tracking-wider" : "text-[13px]"}`}
-        >
-          {value}
-        </code>
-        <CopyButton text={value} />
-      </div>
-    </div>
   );
 }
 

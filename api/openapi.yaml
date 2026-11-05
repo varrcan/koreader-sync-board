@@ -374,6 +374,94 @@ paths:
           $ref: "#/components/responses/Forbidden"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/books:
+    get:
+      operationId: listBooks
+      summary: Книги
+      description: |
+        Книги владельца сессии (в том числе администратора — только свои): по одной на
+        документ, по которому есть прогресс, от последней синхронизации к более ранним.
+        Счётчики считаются по всем книгам пользователя независимо от фильтра и страницы.
+      tags: [progress]
+      parameters:
+        - name: filter
+          in: query
+          required: false
+          description: |
+            `reading` — не прочитанные, `finished` — прочитанные (процент при показе с одним
+            знаком округляется до 100 %), `unknown` — без названия и имени файла. Без
+            параметра — все книги.
+          schema:
+            $ref: "#/components/schemas/BookFilter"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Страница книг
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/books/{hash}:
+    parameters:
+      - $ref: "#/components/parameters/BookHash"
+    get:
+      operationId: getBook
+      summary: Книга
+      description: Книга и последнее состояние на каждом устройстве, с которого она синхронизировалась.
+      tags: [progress]
+      responses:
+        "200":
+          description: Книга и устройства от последней синхронизации к более ранним
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/BookNotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/activity:
+    get:
+      operationId: listActivity
+      summary: Лента активности
+      description: |
+        Синхронизации владельца сессии, свёрнутые в записи: подряд идущие синхронизации
+        одного документа с одного устройства с паузами меньше 30 минут — одна запись.
+        Время — время получения сервером.
+      tags: [progress]
+      parameters:
+        - name: document
+          in: query
+          required: false
+          description: Хеш документа — лента одной книги.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Страница ленты от последней синхронизации к более ранним
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/BookNotFound"
+        default:
+          $ref: "#/components/responses/Error"
 components:
   parameters:
     DeviceID:
@@ -383,6 +471,30 @@ components:
       schema:
         type: integer
         format: int64
+    BookHash:
+      name: hash
+      in: path
+      required: true
+      description: Хеш документа, как его прислала читалка.
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      required: false
+      description: Размер страницы.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: "`next_cursor` предыдущей страницы; клиент его не разбирает."
+      schema:
+        type: string
   headers:
     SessionCookie:
       description: "`ksb_session=…; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax` (`Secure` по HTTPS)"
@@ -391,6 +503,18 @@ components:
   responses:
     NotFound:
       description: "`not_found`: устройства нет или оно недоступно владельцу сессии"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    BookNotFound:
+      description: "`not_found`: у владельца сессии нет прогресса по этому документу"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    BadRequest:
+      description: "`bad_request`: неверный параметр запроса"
       content:
         application/json:
           schema:
@@ -585,3 +709,154 @@ components:
           $ref: "#/components/schemas/Role"
         disabled:
           type: boolean
+    BookFilter:
+      type: string
+      enum: [reading, finished, unknown]
+    Book:
+      type: object
+      required: [hash, title, authors, filename, percentage, finished, updated_at, device_name, reported_device]
+      properties:
+        hash:
+          type: string
+          example: 0123456789abcdef0123456789abcdef
+        title:
+          type: string
+          nullable: true
+          description: Из `metadata` синхронизаций этого пользователя.
+        authors:
+          type: string
+          nullable: true
+        filename:
+          type: string
+          nullable: true
+        percentage:
+          type: number
+          format: double
+          description: Последний присланный процент, 0–1.
+          example: 0.624
+        finished:
+          type: boolean
+          description: Процент при показе с одним знаком округляется до 100 % (≥ 0,9995).
+        updated_at:
+          type: string
+          format: date-time
+          description: Время получения последней синхронизации.
+        device_name:
+          type: string
+          nullable: true
+          description: Имя устройства последней синхронизации в панели; `null`, если устройство удалено.
+        reported_device:
+          type: string
+          description: Поле `device` последней синхронизации как есть.
+          example: PocketBook 740
+    BookCounts:
+      type: object
+      required: [all, reading, finished, unknown]
+      properties:
+        all:
+          type: integer
+        reading:
+          type: integer
+        finished:
+          type: integer
+        unknown:
+          type: integer
+    BookPage:
+      type: object
+      required: [items, next_cursor, counts]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Book"
+        next_cursor:
+          type: string
+          nullable: true
+          description: "`null` на последней странице."
+        counts:
+          $ref: "#/components/schemas/BookCounts"
+    BookDevice:
+      type: object
+      required: [device_name, reported_device, percentage, updated_at]
+      properties:
+        device_name:
+          type: string
+          nullable: true
+        reported_device:
+          type: string
+        percentage:
+          type: number
+          format: double
+        updated_at:
+          type: string
+          format: date-time
+    BookDetail:
+      type: object
+      required: [book, devices]
+      properties:
+        book:
+          $ref: "#/components/schemas/Book"
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/BookDevice"
+    ActivityItem:
+      type: object
+      required:
+        - hash
+        - title
+        - authors
+        - filename
+        - device_name
+        - reported_device
+        - from_percentage
+        - to_percentage
+        - started_at
+        - ended_at
+        - syncs
+      properties:
+        hash:
+          type: string
+        title:
+          type: string
+          nullable: true
+        authors:
+          type: string
+          nullable: true
+        filename:
+          type: string
+          nullable: true
+        device_name:
+          type: string
+          nullable: true
+          description: По последней синхронизации записи.
+        reported_device:
+          type: string
+        from_percentage:
+          type: number
+          format: double
+          description: Процент первой синхронизации записи.
+        to_percentage:
+          type: number
+          format: double
+          description: Процент последней синхронизации записи.
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+        syncs:
+          type: integer
+          description: Число синхронизаций в записи.
+    ActivityPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityItem"
+        next_cursor:
+          type: string
+          nullable: true

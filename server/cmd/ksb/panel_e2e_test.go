@@ -186,3 +186,53 @@ func TestPanelDevicesE2E(t *testing.T) {
 	}
 	unauthorized("revoked", rotated)
 }
+
+// TestPanelProgressE2E: читалка шлёт прогресс с metadata и без → панель видит
+// книгу с названием и неизвестную книгу, ленту и устройства книги.
+func TestPanelProgressE2E(t *testing.T) {
+	t.Setenv("KSB_DATA_DIR", t.TempDir())
+	t.Setenv("ADMIN_USER", "admin")
+	t.Setenv("ADMIN_PASSWORD", "admin-password")
+	base, _ := startServer(t)
+
+	admin := newPanel(t, base, "198.51.100.40")
+	if code, body := admin.call("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "admin-password"}); code != 200 {
+		t.Fatalf("login: %d %v", code, body)
+	}
+	code, body := admin.call("POST", "/api/v1/devices", map[string]string{"name": "pocketbook"})
+	if code != 201 {
+		t.Fatalf("create device: %d %v", code, body)
+	}
+	pb := reader{t: t, base: base, ip: "198.51.100.41", user: "admin", password: body["password"].(string)}
+	known, unknown := accounts.KeyFromPassword("known book"), accounts.KeyFromPassword("unknown book")
+	pb.call("PUT", "/syncs/progress", map[string]any{
+		"document": known, "progress": "/body/DocFragment[5]/body/p[3]/text().0", "percentage": 0.3,
+		"device": "PocketBook 740", "device_id": "PB",
+		"metadata": map[string]any{"title": "Мастер и Маргарита", "authors": "Михаил Булгаков", "filename": "master.epub"},
+	}).expect(t, "push with metadata", 200, "")
+	pb.push(unknown, 0.1).expect(t, "push without metadata", 200, "")
+
+	code, body = admin.call("GET", "/api/v1/books", nil)
+	items, _ := body["items"].([]any)
+	if code != 200 || len(items) != 2 {
+		t.Fatalf("books: %d %v", code, body)
+	}
+	u, k := items[0].(map[string]any), items[1].(map[string]any)
+	if u["hash"] != unknown || u["title"] != nil || u["filename"] != nil ||
+		k["hash"] != known || k["title"] != "Мастер и Маргарита" || k["filename"] != "master.epub" || k["device_name"] != "pocketbook" {
+		t.Fatalf("books %v", items)
+	}
+	if c := body["counts"].(map[string]any); c["unknown"] != 1.0 || c["reading"] != 2.0 {
+		t.Fatalf("counts %v", c)
+	}
+
+	code, body = admin.call("GET", "/api/v1/activity?document="+known, nil)
+	if items, _ := body["items"].([]any); code != 200 || len(items) != 1 || items[0].(map[string]any)["syncs"] != 1.0 {
+		t.Fatalf("activity: %d %v", code, body)
+	}
+	code, body = admin.call("GET", "/api/v1/books/"+known, nil)
+	ds, _ := body["devices"].([]any)
+	if code != 200 || len(ds) != 1 || ds[0].(map[string]any)["reported_device"] != "PocketBook 740" {
+		t.Fatalf("book: %d %v", code, body)
+	}
+}

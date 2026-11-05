@@ -60,8 +60,9 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	}
 
 	ip := clientip.New(cfg.TrustedProxies)
+	prog := progress.New(db)
 	handler := server.New(server.Handlers{
-		Kosync: kosync.New(acc, progress.New(db), kosync.Options{
+		Kosync: kosync.New(acc, prog, kosync.Options{
 			Registration: cfg.KosyncRegistration,
 			SelfDelete:   cfg.KosyncSelfDelete,
 			ClientIP:     ip,
@@ -70,6 +71,7 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 			Accounts: acc,
 			Auth:     panelauth.New(acc, ip, log),
 			Setup:    setup,
+			Progress: prog,
 			Log:      log,
 		}),
 		Web: web.Handler(),

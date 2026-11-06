@@ -308,6 +308,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/statistics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Снимок статистики чтения
+         * @description Состояние последнего принятого `statistics.sqlite3` владельца сессии (в том числе
+         *     администратора — только своё): когда и откуда пришёл, сколько в нём книг и записей.
+         *     Снимок приходит с читалок через облачную синхронизацию KOReader (WebDAV, `/dav/`)
+         *     или загружается из панели.
+         */
+        get: operations["getStatistics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/statistics/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Загрузить statistics.sqlite3
+         * @description Принимает файл статистики KOReader. Снимка нет — файл становится снимком. Снимок
+         *     есть — файл объединяется с ним по правилам KOReader без удалений (книги по
+         *     названию, авторам и хешу; записи по книге, странице и началу, большая длительность
+         *     побеждает). Читалки получат результат при следующей синхронизации. Если снимок
+         *     менялся во время объединения, оно повторяется до трёх раз.
+         */
+        post: operations["importStatistics"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -410,7 +457,10 @@ export interface components {
         Book: {
             /** @example 0123456789abcdef0123456789abcdef */
             hash: string;
-            /** @description Из `metadata` синхронизаций этого пользователя. */
+            /**
+             * @description Из `metadata` синхронизаций этого пользователя, а если её не было — из его
+             *     статистики чтения по тому же хешу.
+             */
             title: string | null;
             authors: string | null;
             filename: string | null;
@@ -487,6 +537,39 @@ export interface components {
         ActivityPage: {
             items: components["schemas"]["ActivityItem"][];
             next_cursor: string | null;
+        };
+        /**
+         * @description `webdav` — выгрузка с читалки, `import` — загрузка из панели.
+         * @enum {string}
+         */
+        StatisticsSource: "webdav" | "import";
+        StatisticsSnapshot: {
+            /** Format: date-time */
+            uploaded_at: string;
+            /** @description Устройство, выгрузившее снимок; `null` для загрузки из панели. */
+            device_name: string | null;
+            source: components["schemas"]["StatisticsSource"];
+            /**
+             * Format: int64
+             * @description Размер файла в байтах.
+             */
+            size: number;
+            books: number;
+            /** @description Записи чтения страниц (`page_stat_data`). */
+            records: number;
+            /**
+             * Format: date-time
+             * @description Начало самой ранней записи чтения.
+             */
+            first_read_at: string | null;
+            /**
+             * Format: date-time
+             * @description Начало самой поздней записи чтения.
+             */
+            last_read_at: string | null;
+        };
+        StatisticsState: {
+            snapshot: components["schemas"]["StatisticsSnapshot"] | null;
         };
     };
     responses: {
@@ -1026,7 +1109,8 @@ export interface operations {
             query?: {
                 /**
                  * @description `reading` — не прочитанные, `finished` — прочитанные (процент при показе с одним
-                 *     знаком округляется до 100 %), `unknown` — без названия и имени файла. Без
+                 *     знаком округляется до 100 %), `unknown` — без названия и имени файла (в том
+                 *     числе в статистике чтения). Без
                  *     параметра — все книги.
                  */
                 filter?: components["schemas"]["BookFilter"];
@@ -1109,6 +1193,82 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["BookNotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getStatistics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description `snapshot = null`, если статистика ещё не синхронизировалась */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatisticsState"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Error"];
+        };
+    };
+    importStatistics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": Blob;
+            };
+        };
+        responses: {
+            /** @description Новое состояние снимка */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatisticsState"];
+                };
+            };
+            /** @description `invalid_statistics`: файл не является статистикой KOReader */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["CrossOrigin"];
+            /** @description `conflict`: снимок менялся во время каждой попытки объединения */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `file_too_large`: файл больше 64 МиБ */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             default: components["responses"]["Error"];
         };
     };

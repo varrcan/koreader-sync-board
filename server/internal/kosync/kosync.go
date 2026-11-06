@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
+	"github.com/varrcan/koreader-sync-board/server/internal/authlog"
 	"github.com/varrcan/koreader-sync-board/server/internal/clientip"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 )
@@ -55,9 +56,6 @@ func New(acc *accounts.Service, prog *progress.Store, opts Options, log *slog.Lo
 
 // maxBody ограничивает тело запроса: запросы KOReader занимают сотни байт.
 const maxBody = 1 << 20
-
-// maxLoggedUser — сколько байт имени пользователя попадает в лог.
-const maxLoggedUser = 64
 
 // acceptRe — шаблон gin "^application/vnd." .. name .. ".v(%d+)(.*)+json$".
 // Точки в Lua-шаблоне — любой символ, «+» после «)» — литерал.
@@ -293,21 +291,12 @@ func (h *Handler) clientAddr(r *http.Request) netip.Addr {
 // logFailure пишет неудачную попытку входа: имя и адрес клиента, без ключа.
 // По этой строке работает фильтр fail2ban из README.
 func (h *Handler) logFailure(r *http.Request, user, reason string) {
-	ip := r.RemoteAddr
-	if a := h.clientAddr(r); a.IsValid() {
-		ip = a.String()
-	}
 	if user == "" {
 		if v, ok := header(r, "x-auth-user").(string); ok {
 			user = v
 		}
 	}
-	// Имя приходит из заголовка и может занимать до 1 MiB, а отказы без проверки
-	// ключа (битые заголовки) ограничителем не считаются: без обрезки лог раздувается.
-	if len(user) > maxLoggedUser {
-		user = strings.ToValidUTF8(user[:maxLoggedUser], "") + "…"
-	}
-	h.log.Warn("kosync: authorization failed", "user", user, "ip", ip, "path", r.URL.Path, "reason", reason)
+	authlog.Failure(h.log, "kosync", r, h.clientAddr(r), user, reason)
 }
 
 // logRejected логирует отказ проверки ключа, кроме повтора недавно

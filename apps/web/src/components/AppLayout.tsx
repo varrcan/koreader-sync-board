@@ -71,8 +71,11 @@ export function AppLayout() {
   );
 
   return (
-    <div className="flex min-h-svh">
-      <aside className="sticky top-0 hidden h-svh w-58 shrink-0 flex-col gap-7 border-r bg-sidebar px-3 py-5 md:flex">
+    // Меню и колонка содержимого — один блок по центру: на широком мониторе
+    // пустое поле делится поровну, а не остаётся справа. Ширина — меню (w-58),
+    // самая широкая колонка страниц (max-w-5xl) и отступы main (md:px-8).
+    <div className="mx-auto flex min-h-svh w-full max-w-[calc(--spacing(58)+var(--container-5xl)+--spacing(16))]">
+      <aside className="sticky top-0 hidden h-svh w-58 shrink-0 flex-col gap-7 border-r px-3 py-5 md:flex">
         <div className="px-2">
           <Logo />
         </div>

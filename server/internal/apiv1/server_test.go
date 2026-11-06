@@ -19,6 +19,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
+	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
 )
 
@@ -47,10 +48,11 @@ type env struct {
 	db    *store.DB
 	acc   *accounts.Service
 	setup *panelauth.Setup
+	stats *statistics.Store
 	logs  *lockedBuffer
 }
 
-func newEnv(t *testing.T) *env {
+func newEnv(t *testing.T, statsOpts ...statistics.Option) *env {
 	t.Helper()
 	ctx := context.Background()
 	db, err := store.Open(ctx, filepath.Join(t.TempDir(), store.FileName))
@@ -63,10 +65,11 @@ func newEnv(t *testing.T) *env {
 	lim := ratelimit.New(log)
 	acc := accounts.New(db, accounts.WithArgon2Params(accounts.TestArgon2Params), accounts.WithLimiter(lim))
 	setup := panelauth.NewSetup(acc, lim)
+	stats := statistics.New(db, t.TempDir(), log, statsOpts...)
 	srv := httptest.NewServer(NewHandler(&Server{Accounts: acc, Auth: panelauth.New(acc, nil, log), Setup: setup,
-		Progress: progress.New(db), Log: log}))
+		Progress: progress.New(db), Statistics: stats, Log: log}))
 	t.Cleanup(srv.Close)
-	return &env{t: t, ctx: ctx, url: srv.URL, db: db, acc: acc, setup: setup, logs: logs}
+	return &env{t: t, ctx: ctx, url: srv.URL, db: db, acc: acc, setup: setup, stats: stats, logs: logs}
 }
 
 // browser — клиент со своим cookie jar.

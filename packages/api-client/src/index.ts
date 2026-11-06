@@ -24,6 +24,8 @@ export type BookDevice = Schemas["BookDevice"];
 export type BookDetail = Schemas["BookDetail"];
 export type ActivityItem = Schemas["ActivityItem"];
 export type ActivityPage = Schemas["ActivityPage"];
+export type StatisticsSnapshot = Schemas["StatisticsSnapshot"];
+export type StatisticsState = Schemas["StatisticsState"];
 
 export type ApiClient = ReturnType<typeof createApiClient>;
 

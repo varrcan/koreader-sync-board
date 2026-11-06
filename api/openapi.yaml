@@ -389,7 +389,8 @@ paths:
           required: false
           description: |
             `reading` — не прочитанные, `finished` — прочитанные (процент при показе с одним
-            знаком округляется до 100 %), `unknown` — без названия и имени файла. Без
+            знаком округляется до 100 %), `unknown` — без названия и имени файла (в том
+            числе в статистике чтения). Без
             параметра — все книги.
           schema:
             $ref: "#/components/schemas/BookFilter"
@@ -460,6 +461,76 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/BookNotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/statistics:
+    get:
+      operationId: getStatistics
+      summary: Снимок статистики чтения
+      description: |
+        Состояние последнего принятого `statistics.sqlite3` владельца сессии (в том числе
+        администратора — только своё): когда и откуда пришёл, сколько в нём книг и записей.
+        Снимок приходит с читалок через облачную синхронизацию KOReader (WebDAV, `/dav/`)
+        или загружается из панели.
+      tags: [statistics]
+      responses:
+        "200":
+          description: "`snapshot = null`, если статистика ещё не синхронизировалась"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatisticsState"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/statistics/import:
+    post:
+      operationId: importStatistics
+      summary: Загрузить statistics.sqlite3
+      description: |
+        Принимает файл статистики KOReader. Снимка нет — файл становится снимком. Снимок
+        есть — файл объединяется с ним по правилам KOReader без удалений (книги по
+        названию, авторам и хешу; записи по книге, странице и началу, большая длительность
+        побеждает). Читалки получат результат при следующей синхронизации. Если снимок
+        менялся во время объединения, оно повторяется до трёх раз.
+      tags: [statistics]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Новое состояние снимка
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatisticsState"
+        "400":
+          description: "`invalid_statistics`: файл не является статистикой KOReader"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/CrossOrigin"
+        "409":
+          description: "`conflict`: снимок менялся во время каждой попытки объединения"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: "`file_too_large`: файл больше 64 МиБ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           $ref: "#/components/responses/Error"
 components:
@@ -722,7 +793,9 @@ components:
         title:
           type: string
           nullable: true
-          description: Из `metadata` синхронизаций этого пользователя.
+          description: |
+            Из `metadata` синхронизаций этого пользователя, а если её не было — из его
+            статистики чтения по тому же хешу.
         authors:
           type: string
           nullable: true
@@ -860,3 +933,47 @@ components:
         next_cursor:
           type: string
           nullable: true
+    StatisticsSource:
+      type: string
+      enum: [webdav, import]
+      description: "`webdav` — выгрузка с читалки, `import` — загрузка из панели."
+    StatisticsSnapshot:
+      type: object
+      required: [uploaded_at, device_name, source, size, books, records, first_read_at, last_read_at]
+      properties:
+        uploaded_at:
+          type: string
+          format: date-time
+        device_name:
+          type: string
+          nullable: true
+          description: Устройство, выгрузившее снимок; `null` для загрузки из панели.
+        source:
+          $ref: "#/components/schemas/StatisticsSource"
+        size:
+          type: integer
+          format: int64
+          description: Размер файла в байтах.
+        books:
+          type: integer
+        records:
+          type: integer
+          description: Записи чтения страниц (`page_stat_data`).
+        first_read_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Начало самой ранней записи чтения.
+        last_read_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Начало самой поздней записи чтения.
+    StatisticsState:
+      type: object
+      required: [snapshot]
+      properties:
+        snapshot:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/StatisticsSnapshot"

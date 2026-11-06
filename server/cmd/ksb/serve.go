@@ -21,8 +21,10 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
 	"github.com/varrcan/koreader-sync-board/server/internal/server"
+	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
 	"github.com/varrcan/koreader-sync-board/server/internal/web"
+	"github.com/varrcan/koreader-sync-board/server/internal/webdav"
 )
 
 func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logger) error {
@@ -39,8 +41,8 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	}
 	defer db.Close()
 
-	// Один ограничитель на kosync и панель: подбор пароля панели и ключа kosync
-	// с одного адреса расходует общий бюджет.
+	// Один ограничитель на kosync, WebDAV и панель: подбор пароля панели и ключа
+	// устройства с одного адреса расходует общий бюджет.
 	limiter := ratelimit.New(log)
 	acc := accounts.New(db, accounts.WithLimiter(limiter))
 	created, err := acc.Bootstrap(ctx, cfg.AdminUser, cfg.AdminPassword)
@@ -61,6 +63,7 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 
 	ip := clientip.New(cfg.TrustedProxies)
 	prog := progress.New(db)
+	stats := statistics.New(db, cfg.DataDir, log)
 	handler := server.New(server.Handlers{
 		Kosync: kosync.New(acc, prog, kosync.Options{
 			Registration: cfg.KosyncRegistration,
@@ -68,13 +71,15 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 			ClientIP:     ip,
 		}, log),
 		API: apiv1.NewHandler(&apiv1.Server{
-			Accounts: acc,
-			Auth:     panelauth.New(acc, ip, log),
-			Setup:    setup,
-			Progress: prog,
-			Log:      log,
+			Accounts:   acc,
+			Auth:       panelauth.New(acc, ip, log),
+			Setup:      setup,
+			Progress:   prog,
+			Statistics: stats,
+			Log:        log,
 		}),
-		Web: web.Handler(),
+		WebDAV: webdav.New(acc, stats, ip, log),
+		Web:    web.Handler(),
 	})
 	srv := &http.Server{
 		Addr:              cfg.Listen,

@@ -115,8 +115,26 @@
         "customServer": "Custom sync server",
         "registerLogin": "Register / Login",
         "login": "Login",
-        "sendMetadata": "Send document metadata"
+        "sendMetadata": "Send document metadata",
+        "cloudStorage": "Cloud storage",
+        "readingStatistics": "Reading statistics",
+        "settings": "Settings",
+        "cloudSync": "Cloud sync",
+        "chooseFolder": "Long-press here to choose current folder",
+        "syncNow": "Sync now"
       }
+    },
+    "webdav": {
+      "title": "Reading statistics sync",
+      "step1": "Open",
+      "step1Hint": "and add a WebDAV server.",
+      "step1Legacy": "KOReader 2026.07 has two such items: use “Cloud storage+” — statistics sync only works through it; the old “Cloud storage” keeps its own list of servers.",
+      "address": "WebDAV address",
+      "credentials": "Same username and password as above. Leave the start folder empty.",
+      "step2": "In",
+      "step2Hint": "pick this server, then in the folder list long-press",
+      "step3": "Sync:",
+      "step3Hint": "The vocabulary builder syncs the same way from its own settings."
     }
   },
   "common": {
@@ -177,7 +195,7 @@
     "history": "Sync history",
     "lastSync": "{{device}} · {{when}}",
     "unknownTitle": "The title will appear once you turn on",
-    "unknownText": "KOReader will send the title, authors and file name with the next sync. The option is available in KOReader 2026.07 and later."
+    "unknownText": "KOReader will send the title, authors and file name with the next sync. The option is available in KOReader 2026.07 and later. The title and authors also come from reading statistics once you set up its sync — see the Devices screen."
   },
   "feed": {
     "today": "Today",
@@ -199,6 +217,25 @@
     "forbidden": "You do not have permission to do this.",
     "device_exists": "A device with this name already exists.",
     "invalid_device_name": "The name must be 1 to 64 characters long.",
+    "invalid_statistics": "This is not a KOReader statistics file (statistics.sqlite3), or it is damaged.",
+    "file_too_large": "The file is larger than 64 MiB.",
+    "conflict": "Statistics changed during the upload because a reader synced. Please try again.",
     "unknown": "The request failed. Please try again."
+  },
+  "statistics": {
+    "title": "Reading statistics",
+    "description": "Reading time and pages come from your readers via KOReader cloud sync (WebDAV).",
+    "loadError": "Could not load the statistics status.",
+    "never": "No reader has synced statistics yet.",
+    "fromDevice": "Updated {{when}} from “{{device}}”",
+    "fromImport": "Updated {{when}}: uploaded from the panel",
+    "summary": "Books: {{books}} · reading records: {{records}}",
+    "period": "From {{from}} to {{to}}",
+    "setupTitle": "How to set up KOReader",
+    "credentials": "Username: {{username}}; password: the device password, the same one used for progress sync. If you forgot it, issue a new one in the device list above. Leave the start folder empty.",
+    "upload": "Upload file",
+    "uploading": "Uploading…",
+    "uploaded": "The file was merged into the statistics on the server.",
+    "uploadHint": "statistics.sqlite3 from the KOReader settings folder. Take it from a reader that is turned off or has just synced. It is merged into the statistics on the server and nothing is deleted; readers get the data on their next sync."
   }
 }

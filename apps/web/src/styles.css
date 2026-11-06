@@ -126,4 +126,17 @@
   body {
     @apply bg-background font-sans text-foreground antialiased;
   }
+  /* Preflight Tailwind v4 оставляет у кнопок системный курсор. */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="option"]:not([data-disabled]),
+  [role="menuitem"]:not([data-disabled]),
+  [role="tab"],
+  summary,
+  select:not(:disabled),
+  input[type="file"]:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    cursor: pointer;
+  }
 }

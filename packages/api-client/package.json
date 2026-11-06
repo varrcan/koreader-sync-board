@@ -8,7 +8,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "generate": "openapi-typescript ../../api/openapi.yaml -o src/schema.d.ts",
+    "generate": "node scripts/generate.js",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },

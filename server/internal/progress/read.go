@@ -27,7 +27,8 @@ const (
 	FilterUnknown  Filter = "unknown"
 )
 
-// Book — книга пользователя: метаданные из его синхронизаций и последнее событие.
+// Book — книга пользователя: метаданные из его синхронизаций (название и авторы,
+// если их не было, — из его статистики чтения) и последнее событие.
 type Book struct {
 	Hash                     string
 	Title, Authors, Filename *string
@@ -75,7 +76,19 @@ type ActivityPage struct {
 	Next  int64
 }
 
-const unknownCond = `c.meta_title IS NULL AND c.meta_filename IS NULL`
+// statBook — книга из статистики чтения пользователя с тем же хешем, если
+// синхронизации не прислали название. Строк на один хеш бывает несколько (в
+// KOReader правили метаданные: уникальность в book — по title, authors, md5),
+// берётся самая поздно открытая. Строки без названия не учитываются ни здесь,
+// ни в unknownCond.
+const statBook = `LEFT JOIN stat_books st ON st.id = (
+		SELECT s.id FROM stat_books s
+		WHERE s.user_id = c.user_id AND s.document_id = c.document_id AND s.title <> ''
+		ORDER BY s.last_open DESC, s.id DESC LIMIT 1)`
+
+const unknownCond = `c.meta_title IS NULL AND c.meta_filename IS NULL AND NOT EXISTS (
+		SELECT 1 FROM stat_books s
+		WHERE s.user_id = c.user_id AND s.document_id = c.document_id AND s.title <> '')`
 
 var filterCond = map[Filter]string{
 	FilterAll:      ``,
@@ -90,12 +103,13 @@ func ValidFilter(f Filter) bool {
 	return ok
 }
 
-const bookColumns = `d.hash, c.meta_title, c.meta_authors, c.meta_filename,
+const bookColumns = `d.hash, coalesce(c.meta_title, st.title), coalesce(c.meta_authors, st.authors), c.meta_filename,
 	e.percentage, e.server_ts, cr.name, e.device, c.event_id
 	FROM progress_current c
 	JOIN documents d ON d.id = c.document_id
 	JOIN progress_events e ON e.id = c.event_id
-	LEFT JOIN device_credentials cr ON cr.id = e.credential_id`
+	LEFT JOIN device_credentials cr ON cr.id = e.credential_id
+	` + statBook
 
 // Books возвращает страницу книг пользователя от последней синхронизации к более
 // ранним и счётчики по всем его книгам. before — курсор (0 — с начала).
@@ -255,7 +269,7 @@ func (s *Store) Activity(ctx context.Context, userID int64, hash string, before 
 			SELECT document_id, min(id) AS first_id, max(id) AS last_id, count(*) AS syncs
 			FROM grp GROUP BY document_id, credential_id, g
 		)
-		SELECT d.hash, c.meta_title, c.meta_authors, c.meta_filename,
+		SELECT d.hash, coalesce(c.meta_title, st.title), coalesce(c.meta_authors, st.authors), c.meta_filename,
 		       cr.name, l.device, f.percentage, l.percentage, f.server_ts, l.server_ts,
 		       groups.syncs, groups.last_id
 		FROM groups
@@ -264,6 +278,7 @@ func (s *Store) Activity(ctx context.Context, userID int64, hash string, before 
 		JOIN documents d ON d.id = groups.document_id
 		LEFT JOIN progress_current c ON c.user_id = ?1 AND c.document_id = groups.document_id
 		LEFT JOIN device_credentials cr ON cr.id = l.credential_id
+		`+statBook+`
 		WHERE groups.last_id < ?4
 		ORDER BY groups.last_id DESC
 		LIMIT ?5`, userID, docID, int64(GroupGap/time.Second), before, limit+1)

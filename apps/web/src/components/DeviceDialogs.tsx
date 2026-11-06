@@ -1,11 +1,11 @@
 import type { Device, DeviceWithPassword, Me, UserSummary } from "@ksb/api-client";
 import { queryOptions, useMutation, useQuery } from "@tanstack/react-query";
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, failure } from "@/api";
 import { errorText, queryClient } from "@/auth";
 import { FormError } from "@/components/FormError";
-import { MenuLabel, Value } from "@/components/KoreaderSetup";
+import { MenuLabel, Step, Value, WebdavSteps } from "@/components/KoreaderSetup";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -258,17 +258,6 @@ export function ConfirmDeviceDialog({
   );
 }
 
-function Step({ n, children }: { n: number; children: ReactNode }) {
-  return (
-    <li className="flex gap-3">
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-secondary text-xs font-semibold">
-        {n}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-3 pt-0.5 text-sm text-muted-foreground">{children}</div>
-    </li>
-  );
-}
-
 /**
  * Пароль показывается один раз, поэтому карточка закрывается только кнопкой:
  * клик мимо или Esc не должны терять его до того, как человек его сохранил.
@@ -318,6 +307,12 @@ export function PasswordDialog({ issued, onClose }: { issued: DeviceWithPassword
               </p>
             </Step>
           </ol>
+        </section>
+        <section className="flex flex-col gap-4">
+          <h2 className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
+            {t("devices.webdav.title")}
+          </h2>
+          <WebdavSteps credentials={t("devices.webdav.credentials")} />
         </section>
         <DialogFooter>
           <Button onClick={onClose}>{t("devices.passwordCard.done")}</Button>

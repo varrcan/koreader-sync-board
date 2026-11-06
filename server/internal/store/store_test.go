@@ -16,7 +16,7 @@ func TestOpenCreatesSchema(t *testing.T) {
 	}
 	defer db.Close()
 
-	for _, table := range []string{"users", "device_credentials", "documents", "progress_events", "progress_current", "sessions"} {
+	for _, table := range []string{"users", "device_credentials", "documents", "progress_events", "progress_current", "sessions", "webdav_files", "stat_books", "stat_pages"} {
 		var n int
 		if err := db.Read.QueryRowContext(ctx,
 			`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil {
@@ -139,5 +139,39 @@ func TestTwoConnections(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("other connection sees %d documents", n)
+	}
+}
+
+// TestDeleteUserCascadesStatistics: удаление пользователя убирает его файлы WebDAV
+// и статистику, а общий реестр документов не трогает.
+func TestDeleteUserCascadesStatistics(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, q := range []string{
+		`INSERT INTO users (id, username, role, created_at) VALUES (1, 'alice', 'user', 0), (2, 'bob', 'user', 0)`,
+		`INSERT INTO device_credentials (id, user_id, name, key_hash, created_at) VALUES (1, 1, 'Kobo', 'h', 0)`,
+		`INSERT INTO documents (id, hash, first_seen_at) VALUES (1, 'h', 0)`,
+		`INSERT INTO webdav_files (user_id, name, content, etag, size, modified_at, credential_id, source)
+		 VALUES (1, 'statistics.sqlite3', x'00', '"e"', 1, 0, 1, 'webdav'), (2, 'statistics.sqlite3', x'00', '"e"', 1, 0, NULL, 'import')`,
+		`INSERT INTO stat_books (id, user_id, document_id, title) VALUES (1, 1, 1, 'A'), (2, 2, 1, 'B')`,
+		`INSERT INTO stat_pages (book_id, user_id, page, start_time, duration, total_pages) VALUES (1, 1, 1, 1, 1, 1), (2, 2, 1, 1, 1, 1)`,
+		`DELETE FROM users WHERE id = 1`,
+	} {
+		if _, err := db.Write.ExecContext(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	for table, want := range map[string]int{"webdav_files": 1, "stat_books": 1, "stat_pages": 1, "documents": 1} {
+		var n int
+		if err := db.Read.QueryRowContext(ctx, `SELECT count(*) FROM `+table).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != want {
+			t.Errorf("%s: %d rows, want %d", table, n, want)
+		}
 	}
 }

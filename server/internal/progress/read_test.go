@@ -337,3 +337,70 @@ func TestActivityGroups(t *testing.T) {
 		t.Fatalf("empty feed %+v", p)
 	}
 }
+
+// statBook добавляет книгу в статистику пользователя, как после разбора снимка.
+func (e *readEnv) statBook(userID int64, hash, title, authors string, lastOpen int64) {
+	e.t.Helper()
+	db := e.s.db.Write
+	if _, err := db.ExecContext(e.ctx, `INSERT INTO documents (hash, first_seen_at) VALUES (?, 0) ON CONFLICT DO NOTHING`, hash); err != nil {
+		e.t.Fatal(err)
+	}
+	if _, err := db.ExecContext(e.ctx, `
+		INSERT INTO stat_books (user_id, document_id, title, authors, last_open)
+		VALUES (?, (SELECT id FROM documents WHERE hash = ?), ?, nullif(?, ''), ?)`,
+		userID, hash, title, authors, lastOpen); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+func TestTitleFromStatistics(t *testing.T) {
+	e := newReadEnv(t)
+	alice, bob := e.user("alice"), e.user("bob")
+	pb := e.device("alice", "pocketbook")
+	e.sync(pb, "stat", 0.3, time.Minute, Metadata{})
+	e.sync(pb, "meta", 0.4, time.Minute, Metadata{Title: "From metadata"})
+	e.sync(pb, "edited", 0.5, time.Minute, Metadata{})
+	e.sync(pb, "foreign", 0.6, time.Minute, Metadata{})
+	e.sync(pb, "unknown", 0.7, time.Minute, Metadata{})
+
+	e.statBook(alice, "stat", "Stat title", "Stat author", 100)
+	e.statBook(alice, "meta", "Other title", "Meta-less author", 100)
+	// Метаданные книги правили в KOReader: две строки с одним хешем.
+	e.statBook(alice, "edited", "Old title", "Old author", 100)
+	e.statBook(alice, "edited", "New title", "", 200)
+	e.statBook(bob, "foreign", "Bob's title", "Bob", 100)
+
+	page := e.books(alice, FilterAll, 0, 50)
+	got := map[string]Book{}
+	for _, b := range page.Items {
+		got[b.Hash] = b
+	}
+	check := func(hash, title, authors string) {
+		t.Helper()
+		b := got[hash]
+		if str(b.Title) != title || str(b.Authors) != authors || b.Filename != nil {
+			t.Errorf("%s: title %s, authors %s, filename %s", hash, str(b.Title), str(b.Authors), str(b.Filename))
+		}
+	}
+	check("stat", "Stat title", "Stat author")
+	check("meta", "From metadata", "Meta-less author")
+	check("edited", "New title", "<nil>")
+	check("foreign", "<nil>", "<nil>")
+	check("unknown", "<nil>", "<nil>")
+
+	if page.Counts.Unknown != 2 {
+		t.Errorf("unknown count %d, want 2", page.Counts.Unknown)
+	}
+	if u := hashes(e.books(alice, FilterUnknown, 0, 50).Items); u != "unknown,foreign" {
+		t.Errorf("unknown filter %s", u)
+	}
+
+	b, _, err := e.s.Book(e.ctx, alice, "stat")
+	if err != nil || str(b.Title) != "Stat title" || str(b.Authors) != "Stat author" {
+		t.Fatalf("book card: %+v %v", b, err)
+	}
+	a := e.activity(alice, "stat", 0, 10)
+	if len(a.Items) != 1 || str(a.Items[0].Title) != "Stat title" || str(a.Items[0].Authors) != "Stat author" {
+		t.Fatalf("activity: %+v", a.Items)
+	}
+}

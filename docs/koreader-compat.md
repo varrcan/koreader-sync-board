@@ -2,7 +2,7 @@
 
 What the server has to get right to work with an unmodified KOReader (and other
 clients that speak the same protocol). Read this before changing anything under
-`/users/*`, `/syncs/*` or `/healthcheck`.
+`/users/*`, `/syncs/*`, `/healthcheck` or `/dav/`.
 
 Reference implementation: [koreader/koreader-sync-server](https://github.com/koreader/koreader-sync-server)
 (`config/routes.lua`, `config/errors.lua`, `app/controllers/1/syncs_controller.lua`).
@@ -132,6 +132,57 @@ CrossPoint (Xteink X4) sends the constants `device = "CrossPoint"` and
   are ignored.
 - For server type `OTHER`, `metadata` also carries `isbn`, `asin`, `series` and
   `series_index`; these are currently not stored.
+
+## Statistics sync over WebDAV
+
+KOReader syncs `statistics.sqlite3` (and `vocabulary_builder.sqlite3`) only through its cloud
+storage plugin: `plugins/cloudstorage.koplugin` (`main.lua`, `Cloud:sync`;
+`providers/webdav.lua`) and `plugins/statistics.koplugin/main.lua` (`onSync`). The server
+implements just what that client uses under `/dav/`: `PROPFIND`, `GET`/`HEAD`, `PUT`,
+`OPTIONS`. No folders, `DELETE`, `MOVE` or locks; creating a folder from KOReader fails.
+
+### The `Cloud:sync` loop
+
+`GET <folder>/statistics.sqlite3` (200, or 404 on the first sync; any other status is
+"Something went wrong") → three-way merge of the local file, the last upload (`.sync`) and
+the download → `PUT` with `If-Match: <ETag from GET>`. While `PUT` answers 412 the loop
+repeats; there is no retry limit. So:
+
+- every `GET`/`HEAD` must carry a strong `ETag`. Without it KOReader sends `PUT` without
+  `If-Match`, gets 412 and loops forever. KOReader strips a `W/` prefix itself;
+- `PUT` with `If-Match` succeeds only if it matches the current ETag (strong comparison).
+  The check and the write happen in one write transaction, so two uploads with the same
+  ETag cannot both pass;
+- **`PUT` without `If-Match` succeeds only if the file does not exist yet**, otherwise 412.
+  KOReader omits `If-Match` only after a 404. If the file exists by then, two readers are
+  syncing for the first time at once. Overwriting would keep the second one's file, and the
+  first one would then see its books in `.sync` but not in the download and **delete them**
+  (`onSync` treats that as a deletion on another device). A 412 makes it repeat the loop
+  with a merge. 428 is not an option: KOReader shows an error instead of retrying.
+
+`PROPFIND` (Depth 1, a fixed body) is used to pick the folder: the response is parsed with
+regular expressions over `<…response…>`, `<…href…>`, `<…resourcetype/>` and
+`<…collection…/>`, and the current folder is recognised by an `href` equal to the request
+path. Authentication is `Basic` sent up front by LuaSocket, which URL-decodes the password
+first.
+
+### The snapshot
+
+- The file is stored and served byte for byte. KOReader keeps the database in WAL mode, so
+  header bytes 18–19 are 2; such a file cannot be opened without its `-wal`/`-shm`. The
+  server parses a copy with those bytes set to 1 (rollback journal), in memory.
+- Each accepted `statistics.sqlite3` replaces the user's parsed statistics (`book`,
+  `page_stat_data`) in the same transaction as the file: the client has already merged and
+  propagated deletions, the server mirrors the result. `"N/A"` placeholders become empty.
+  `page_stat_data` rows whose `id_book` has no book are skipped (KOReader declares the
+  foreign key but does not enforce it).
+- The vocabulary file is stored without parsing.
+- An upload from the panel is **merged** into the current snapshot with the `onSync` SQL
+  minus its deletion blocks (books by title, authors and `md5`; records by book, page and
+  start time, longer duration wins; totals recomputed). Replacing the snapshot instead would
+  make every reader delete the books missing from it on the next sync.
+- `book.md5` is always the partial MD5. A user whose progress sync uses filename hashing
+  (`md5(basename)`) gets no titles from statistics, because the hashes never match.
 
 ## Storage model
 

@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 
 // navigator.clipboard есть только в безопасном контексте (HTTPS или localhost),
 // а панель часто открывают по http:// в локальной сети. Там копируем через
-// выделение во временном textarea.
+// execCommand("copy"), подставляя текст в событие copy. Выделение во временном
+// textarea не годится: в модальном диалоге Radix возвращает фокус в диалог,
+// выделение пропадает, а execCommand всё равно отвечает true с пустым буфером.
 async function copyText(text: string): Promise<boolean> {
   if (navigator.clipboard && window.isSecureContext) {
     try {
@@ -15,18 +17,20 @@ async function copyText(text: string): Promise<boolean> {
       // ниже — запасной путь
     }
   }
-  const area = document.createElement("textarea");
-  area.value = text;
-  area.setAttribute("readonly", "");
-  area.style.position = "fixed";
-  area.style.opacity = "0";
-  document.body.append(area);
-  area.select();
+  let written = false;
+  const onCopy = (e: ClipboardEvent) => {
+    if (!e.clipboardData) return;
+    e.clipboardData.setData("text/plain", text);
+    e.preventDefault();
+    written = true;
+  };
+  document.addEventListener("copy", onCopy);
   try {
-    return document.execCommand("copy");
+    document.execCommand("copy");
   } finally {
-    area.remove();
+    document.removeEventListener("copy", onCopy);
   }
+  return written;
 }
 
 export function CopyButton({ text }: { text: string }) {

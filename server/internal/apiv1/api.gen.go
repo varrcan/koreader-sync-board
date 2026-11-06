@@ -68,6 +68,24 @@ func (e Role) Valid() bool {
 	}
 }
 
+// Defines values for StatisticsSource.
+const (
+	Import StatisticsSource = "import"
+	Webdav StatisticsSource = "webdav"
+)
+
+// Valid indicates whether the value is a known member of the StatisticsSource enum.
+func (e StatisticsSource) Valid() bool {
+	switch e {
+	case Import:
+		return true
+	case Webdav:
+		return true
+	default:
+		return false
+	}
+}
+
 // ActivityItem defines model for ActivityItem.
 type ActivityItem struct {
 	Authors *string `json:"authors"`
@@ -121,7 +139,8 @@ type Book struct {
 	// Example: PocketBook 740
 	ReportedDevice string `json:"reported_device"`
 
-	// Title Из `metadata` синхронизаций этого пользователя.
+	// Title Из `metadata` синхронизаций этого пользователя, а если её не было — из его
+	// статистики чтения по тому же хешу.
 	Title *string `json:"title"`
 
 	// UpdatedAt Время получения последней синхронизации.
@@ -268,6 +287,38 @@ type SetupStatus struct {
 	Required bool `json:"required"`
 }
 
+// StatisticsSnapshot defines model for StatisticsSnapshot.
+type StatisticsSnapshot struct {
+	Books int `json:"books"`
+
+	// DeviceName Устройство, выгрузившее снимок; `null` для загрузки из панели.
+	DeviceName *string `json:"device_name"`
+
+	// FirstReadAt Начало самой ранней записи чтения.
+	FirstReadAt *time.Time `json:"first_read_at"`
+
+	// LastReadAt Начало самой поздней записи чтения.
+	LastReadAt *time.Time `json:"last_read_at"`
+
+	// Records Записи чтения страниц (`page_stat_data`).
+	Records int `json:"records"`
+
+	// Size Размер файла в байтах.
+	Size int64 `json:"size"`
+
+	// Source `webdav` — выгрузка с читалки, `import` — загрузка из панели.
+	Source     StatisticsSource `json:"source"`
+	UploadedAt time.Time        `json:"uploaded_at"`
+}
+
+// StatisticsSource `webdav` — выгрузка с читалки, `import` — загрузка из панели.
+type StatisticsSource string
+
+// StatisticsState defines model for StatisticsState.
+type StatisticsState struct {
+	Snapshot *StatisticsSnapshot `json:"snapshot"`
+}
+
 // UserSummary defines model for UserSummary.
 type UserSummary struct {
 	Disabled bool   `json:"disabled"`
@@ -335,7 +386,8 @@ type ListActivityParams struct {
 // ListBooksParams defines parameters for ListBooks.
 type ListBooksParams struct {
 	// Filter `reading` — не прочитанные, `finished` — прочитанные (процент при показе с одним
-	// знаком округляется до 100 %), `unknown` — без названия и имени файла. Без
+	// знаком округляется до 100 %), `unknown` — без названия и имени файла (в том
+	// числе в статистике чтения). Без
 	// параметра — все книги.
 	Filter *BookFilter `form:"filter,omitempty" json:"filter,omitempty"`
 
@@ -408,6 +460,12 @@ type ServerInterface interface {
 	// CompleteSetup Создать первого администратора
 	// (POST /api/v1/setup)
 	CompleteSetup(w http.ResponseWriter, r *http.Request)
+	// GetStatistics Снимок статистики чтения
+	// (GET /api/v1/statistics)
+	GetStatistics(w http.ResponseWriter, r *http.Request)
+	// ImportStatistics Загрузить statistics.sqlite3
+	// (POST /api/v1/statistics/import)
+	ImportStatistics(w http.ResponseWriter, r *http.Request)
 	// ListUsers Пользователи
 	// (GET /api/v1/users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -773,6 +831,34 @@ func (siw *ServerInterfaceWrapper) CompleteSetup(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// GetStatistics operation middleware
+func (siw *ServerInterfaceWrapper) GetStatistics(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetStatistics(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ImportStatistics operation middleware
+func (siw *ServerInterfaceWrapper) ImportStatistics(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ImportStatistics(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListUsers operation middleware
 func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
 
@@ -938,6 +1024,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books", wrapper.ListBooks)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books/{hash}", wrapper.GetBook)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/activity", wrapper.ListActivity)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/statistics", wrapper.GetStatistics)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/statistics/import", wrapper.ImportStatistics)
 
 	return m
 }

@@ -308,7 +308,8 @@ func (s *Service) DisableUser(ctx context.Context, username string) error {
 	return affected(res, err)
 }
 
-// DeleteUser удаляет пользователя с устройствами, журналом и текущим прогрессом.
+// DeleteUser удаляет пользователя с устройствами, журналом, текущим прогрессом,
+// файлами WebDAV и статистикой чтения.
 // Общий реестр документов не меняется.
 func (s *Service) DeleteUser(ctx context.Context, username string) error {
 	res, err := s.db.Write.ExecContext(ctx, `DELETE FROM users WHERE username = ?`, username)

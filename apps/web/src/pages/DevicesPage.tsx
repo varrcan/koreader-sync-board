@@ -11,6 +11,7 @@ import {
   PasswordDialog,
   RenameDeviceDialog,
 } from "@/components/DeviceDialogs";
+import { StatisticsCard } from "@/components/StatisticsCard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -165,6 +166,8 @@ export function DevicesPage() {
           </div>
         </details>
       )}
+
+      <StatisticsCard />
 
       {creating && me && (
         <CreateDeviceDialog

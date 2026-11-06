@@ -14,6 +14,7 @@ import (
 type Handlers struct {
 	Kosync http.Handler // /users/*, /syncs/*, /healthcheck
 	API    http.Handler // /api/*
+	WebDAV http.Handler // /dav, /dav/*
 	Web    http.Handler // всё остальное
 }
 
@@ -25,6 +26,9 @@ func New(h Handlers) http.Handler {
 	mux.Handle("/healthcheck", h.Kosync)
 	mux.Handle("/healthcheck/", h.Kosync)
 	mux.Handle("/api/", h.API)
+	// /dav без слэша — тоже WebDAV: иначе ServeMux ответил бы редиректом.
+	mux.Handle("/dav", h.WebDAV)
+	mux.Handle("/dav/", h.WebDAV)
 	mux.Handle("/", h.Web)
 	return mux
 }

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
+	"github.com/varrcan/koreader-sync-board/server/internal/authlog"
 	"github.com/varrcan/koreader-sync-board/server/internal/clientip"
 )
 
@@ -33,9 +34,6 @@ var publicPatterns = map[string]bool{
 	"GET /api/v1/setup":        true,
 	"POST /api/v1/setup":       true,
 }
-
-// maxLoggedUser — сколько байт имени пользователя попадает в лог.
-const maxLoggedUser = 64
 
 // Auth проверяет сессии панели.
 type Auth struct {
@@ -113,14 +111,7 @@ func (a *Auth) ClientAddr(r *http.Request) netip.Addr {
 // LogFailure пишет неудачную проверку пароля или кода настройки. Порядок полей
 // ip → path тот же, что у kosync: по нему работает фильтр fail2ban из README.
 func (a *Auth) LogFailure(r *http.Request, user, reason string) {
-	ip := r.RemoteAddr
-	if addr := a.ClientAddr(r); addr.IsValid() {
-		ip = addr.String()
-	}
-	if len(user) > maxLoggedUser {
-		user = strings.ToValidUTF8(user[:maxLoggedUser], "") + "…"
-	}
-	a.log.Warn("panel: authorization failed", "user", user, "ip", ip, "path", r.URL.Path, "reason", reason)
+	authlog.Failure(a.log, "panel", r, a.ClientAddr(r), user, reason)
 }
 
 // SetCookie выставляет cookie сессии на SessionTTL: его ставят при создании и

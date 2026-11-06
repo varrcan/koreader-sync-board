@@ -12,6 +12,7 @@ linters:
       exclude-functions:
         - (*database/sql.DB).Close
         - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
         - (*database/sql.Tx).Rollback
         - (*os.File).Close
         - (io.Closer).Close
@@ -21,6 +22,7 @@ linters:
         - fmt.Fprintf
         - fmt.Fprintln
         - (*github.com/varrcan/koreader-sync-board/server/internal/store.DB).Close
+        - (*github.com/varrcan/koreader-sync-board/server/internal/statistics.memDB).Close
     govet:
       enable-all: true
       disable:

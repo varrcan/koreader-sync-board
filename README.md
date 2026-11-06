@@ -84,7 +84,7 @@ cannot be shown again. Passwords issued by earlier versions in a longer format k
 docker exec ksb /ksb device list alice           # names, creation and last use, revoked flag
 docker exec ksb /ksb device revoke alice "Kindle"
 docker exec ksb /ksb user disable alice          # blocks all of alice's devices and panel sessions
-docker exec ksb /ksb user delete alice           # removes devices and reading progress
+docker exec ksb /ksb user delete alice           # removes devices, reading progress and statistics
 ```
 
 ## Configure KOReader
@@ -99,6 +99,34 @@ docker exec ksb /ksb user delete alice           # removes devices and reading p
    server only knows the document hash.
 
 Both document matching methods (*Binary* and *Filename*) are supported.
+
+### Reading statistics
+
+KOReader sends its reading statistics (`statistics.sqlite3`: time and pages per book) through
+its built-in cloud sync over WebDAV. The server accepts it at `/dav` with the same device
+password; no plugin is needed.
+
+1. **Cloud storage** → add a **WebDAV** server: address `http://<host>:8080/dav`, the username
+   and the **device password**. Leave the start folder empty. KOReader 2026.07 has two such
+   menu items: use **Cloud storage+**. The older **Cloud storage** app keeps its own list of
+   servers, and statistics sync does not see it.
+2. **Reading statistics → Settings → Cloud sync** → pick this server, then in the folder list
+   long-press **Long-press here to choose current folder**.
+3. **Reading statistics → Sync now**. Repeat whenever you want to sync; KOReader has no timer.
+
+Several e-readers of one user merge their statistics through the server: KOReader downloads
+the file, merges it with its own and uploads the result. The vocabulary builder
+(`vocabulary_builder.sqlite3`) syncs the same way and is stored as is. Files are limited to
+64 MiB.
+
+- Use a password issued by the panel or `ksb device add`. KOReader URL-decodes the WebDAV
+  password, so a password containing `%` (possible for one set from KOReader with
+  **Register** or a password change) works for progress sync but not for WebDAV.
+- The panel shows when statistics were last synced and can upload a `statistics.sqlite3`
+  by hand (for example, from an old e-reader). The upload is merged into the statistics on
+  the server without deleting anything, and readers get it on their next sync.
+- Books synced without **Send document metadata** get their title and authors from the
+  statistics.
 
 ## Configuration
 
@@ -116,7 +144,7 @@ Both document matching methods (*Binary* and *Filename*) are supported.
 ## Failed logins
 
 After **10 failed logins within 10 minutes** from one client address, that address is
-blocked for **15 minutes**. KOReader logins, panel sign-ins (a wrong password, including the
+blocked for **15 minutes**. KOReader logins (progress sync and WebDAV), panel sign-ins (a wrong password, including the
 current password when changing it) and wrong setup codes share this budget. IPv6 clients are counted per `/64` network. Counters live in
 memory and reset on restart.
 
@@ -150,6 +178,11 @@ must append the client address, as nginx does with
 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (nginx proxy manager does
 this by default).
 
+The proxy must not strip or rewrite the `ETag` response header and the `If-Match` request
+header on `/dav/`, and must allow request bodies up to 64 MiB (nginx:
+`client_max_body_size 64m;`). Without `ETag` KOReader uploads without `If-Match`, gets `412`
+and retries forever.
+
 The proxy must also pass the original `Host` header (nginx: `proxy_set_header Host $host;`;
 nginx proxy manager, Caddy and Traefik do this by default). The panel rejects sign-in and
 other changes from a foreign site; over plain `http://` browsers do not send
@@ -171,6 +204,7 @@ Every failed login is logged as one JSON line with the client address:
 ```json
 {"time":"2026-11-04T21:47:10.84+03:00","level":"WARN","msg":"kosync: authorization failed","user":"alice","ip":"198.51.100.7","path":"/users/auth","reason":"unauthorized"}
 {"time":"2026-11-04T21:48:02.11+03:00","level":"WARN","msg":"panel: authorization failed","user":"alice","ip":"198.51.100.7","path":"/api/v1/auth/login","reason":"unauthorized"}
+{"time":"2026-11-04T21:49:31.52+03:00","level":"WARN","msg":"webdav: authorization failed","user":"alice","ip":"198.51.100.7","path":"/dav/statistics.sqlite3","reason":"unauthorized"}
 ```
 
 Repeats of an already rejected password and requests refused because of a block are not
@@ -179,7 +213,7 @@ logged. To ban persistent offenders for longer, create `/etc/fail2ban/filter.d/k
 ```ini
 [Definition]
 # Matches the plain JSON line and Docker's json-file log, where quotes are escaped.
-failregex = \\?"msg\\?":\\?"(?:kosync|panel): authorization failed\\?".*\\?"ip\\?":\\?"<HOST>\\?",\\?"path\\?"
+failregex = \\?"msg\\?":\\?"(?:kosync|panel|webdav): authorization failed\\?".*\\?"ip\\?":\\?"<HOST>\\?",\\?"path\\?"
 datepattern = "time\\?":\\?"%%Y-%%m-%%dT%%H:%%M:%%S(?:\.\d+)?%%z
 ```
 

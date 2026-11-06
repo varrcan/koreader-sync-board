@@ -9,6 +9,10 @@ import { BookPage } from "./pages/BookPage";
 import { BooksPage } from "./pages/BooksPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { DevicesPage } from "./pages/DevicesPage";
+import { HelpIndexPage } from "./pages/help/HelpIndexPage";
+import { HelpProgressPage } from "./pages/help/HelpProgressPage";
+import { HelpStatisticsPage } from "./pages/help/HelpStatisticsPage";
+import { HelpTroubleshootingPage } from "./pages/help/HelpTroubleshootingPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { SetupPage } from "./pages/SetupPage";
@@ -100,10 +104,44 @@ const passwordRoute = createRoute({
   component: ChangePasswordPage,
 });
 
+const helpRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/help",
+  component: HelpIndexPage,
+});
+
+const helpProgressRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/help/progress",
+  component: HelpProgressPage,
+});
+
+const helpStatisticsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/help/statistics",
+  component: HelpStatisticsPage,
+});
+
+const helpTroubleshootingRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/help/troubleshooting",
+  component: HelpTroubleshootingPage,
+});
+
 const routeTree = rootRoute.addChildren([
   setupRoute,
   loginRoute,
-  appRoute.addChildren([indexRoute, booksRoute, bookRoute, devicesRoute, passwordRoute]),
+  appRoute.addChildren([
+    indexRoute,
+    booksRoute,
+    bookRoute,
+    devicesRoute,
+    passwordRoute,
+    helpRoute,
+    helpProgressRoute,
+    helpStatisticsRoute,
+    helpTroubleshootingRoute,
+  ]),
 ]);
 
 export const router = createRouter({ routeTree });

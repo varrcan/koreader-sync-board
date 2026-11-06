@@ -10,7 +10,8 @@
     "home": "Home",
     "books": "Books",
     "password": "Change password",
-    "devices": "Devices"
+    "devices": "Devices",
+    "help": "Help"
   },
   "roles": {
     "admin": "Administrator",
@@ -121,7 +122,23 @@
         "settings": "Settings",
         "cloudSync": "Cloud sync",
         "chooseFolder": "Long-press here to choose current folder",
-        "syncNow": "Sync now"
+        "syncNow": "Sync now",
+        "autoSync": "Automatically keep documents in sync",
+        "syncEveryPages": "Periodically sync every # pages",
+        "syncBehavior": "Sync behavior",
+        "syncNewer": "Sync to a newer state",
+        "syncOlder": "Sync to an older state",
+        "pushNow": "Push progress from this device now",
+        "pullNow": "Pull progress from other devices now",
+        "matchingMethod": "Document matching method",
+        "matchingBinary": "Binary. Only identical files will be kept in sync.",
+        "matchingFilename": "Filename. Files with matching names will be kept in sync.",
+        "network": "Network",
+        "wifiAction": "Action when Wi-Fi is off",
+        "turnOn": "Turn on",
+        "cloudStoragePlus": "Cloud storage+",
+        "vocabularyBuilder": "Vocabulary builder",
+        "logout": "Logout"
       }
     },
     "webdav": {
@@ -164,7 +181,7 @@
       "metadataTitle": "Turn on",
       "metadataText": "Without it, books arrive without titles and authors, as unknown books. The option is available in KOReader 2026.07 and later.",
       "step3Title": "Open a book and turn a few pages",
-      "step3Text": "Progress is sent when you close the book or run sync manually."
+      "step3Text": "Progress reaches the server when <autoSync/> is on in KOReader — on closing the book and on sleep — or when you run <pushNow/>. Automatic sync is off by default."
     }
   },
   "books": {
@@ -237,5 +254,158 @@
     "uploading": "Uploading…",
     "uploaded": "The file was merged into the statistics on the server.",
     "uploadHint": "statistics.sqlite3 from the KOReader settings folder. Take it from a reader that is turned off or has just synced. It is merged into the statistics on the server and nothing is deleted; readers get the data on their next sync."
+  },
+  "help": {
+    "more": "Learn more",
+    "cause": "Cause",
+    "fix": "What to do",
+    "index": {
+      "description": "How to connect KOReader to the server and what to do when something does not sync."
+    },
+    "pages": {
+      "progress": {
+        "title": "Progress sync",
+        "text": "Connecting KOReader, when progress is sent, which files count as the same book."
+      },
+      "statistics": {
+        "title": "Statistics and vocabulary",
+        "text": "Syncing reading statistics and the vocabulary over WebDAV, uploading a statistics file."
+      },
+      "troubleshooting": {
+        "title": "Troubleshooting",
+        "text": "Login and sync errors, unknown books, position not carried over to another reader."
+      }
+    },
+    "progress": {
+      "intro": "KOReader sends your position in a book to the server with its built-in progress sync — no plugins needed. Below is how to connect it and which settings decide when, and between which files, the position is carried over.",
+      "setup": {
+        "title": "Connecting",
+        "device": "Add the reader on the <a>Devices screen</a> — the panel will issue a device password. Each reader has its own password: you can revoke or change it without touching the others.",
+        "server": "In KOReader open the tools tab (wrench) → <progressSync/> → <customServer/> and enter the server address:",
+        "login": "Then <registerLogin/>: enter the username and the device password and tap <login/>.",
+        "password": "The password is the one the panel showed when you added the device. Lost it — issue a new one on the Devices screen.",
+        "metadata": "Turn on <sendMetadata/> so the server knows book titles (<a>details</a>)."
+      },
+      "autoSync": {
+        "title": "When progress is sent",
+        "default": "Automatic sync in KOReader is <strong>off</strong> by default: progress reaches the server only when you choose <pushNow/>. Without automatic sync, closing a book sends nothing.",
+        "enabled": "With <autoSync/> on, KOReader sends the position when you close a book, when the reader goes to sleep and when the network disconnects, and pulls the position from other devices when you open a book, wake the reader and connect to the network.",
+        "pages": "<syncEveryPages/> sends the position every N pages. It is available only with automatic sync on and does not turn Wi-Fi on by itself: it works only if the network is already connected.",
+        "wifi": "On readers where KOReader turns Wi-Fi on by itself, automatic sync requires settings (gear) → <network/> → <wifiAction/> set to <turnOn/>. Otherwise KOReader will not let you enable it and turns it off if it was on.",
+        "logout": "<logout/> in progress sync turns automatic sync on. If the reader used another server before and you logged out of it, automatic sync is most likely already on."
+      },
+      "behavior": {
+        "title": "Sync behavior",
+        "intro": "<syncBehavior/> sets what to do with a position that comes from the server.",
+        "time": "“Newer” and “older” here are about time, not about the place in the book: KOReader compares when the position was saved on the other device with its own last page turn. If you later went back to the start of a chapter on your phone, the phone's position is newer even though it is closer to the beginning.",
+        "newer": "<syncNewer/> — what to do with a newer position. By default KOReader asks.",
+        "older": "<syncOlder/> — what to do with an older one. By default nothing: it is not applied.",
+        "pull": "To pull the position manually — <pullNow/>."
+      },
+      "metadata": {
+        "title": "Document metadata",
+        "text": "With the progress KOReader sends only a hash of the file, not the title. With <sendMetadata/> on, it adds the title, authors and file name. Without it the book shows up in the panel as unknown until the title comes from <a>reading statistics</a>. The option is available in KOReader 2026.07 and later."
+      },
+      "matching": {
+        "title": "Document matching",
+        "intro": "<matchingMethod/> decides which files on different readers count as the same book.",
+        "binary": "<matchingBinary/> — the default. The position is shared only between byte-for-byte identical files.",
+        "filename": "<matchingFilename/> — the position is shared between files with the same name. Titles from reading statistics are not matched to such books: statistics identifies books by the file contents.",
+        "same": "Use the same method on all readers: with different methods the position is not carried over between them."
+      },
+      "formats": {
+        "title": "Different files of the same book",
+        "text": "For the server a book is a specific file. FB2 and EPUB of the same book, as well as a file changed after copying (for example, by editing metadata in a library manager), are different books, and the position is not carried over between them. To read on several devices, copy the same file to all of them."
+      }
+    },
+    "statistics": {
+      "intro": "KOReader syncs reading statistics and the vocabulary through cloud storage, and the server connects to it as WebDAV. No plugins needed.",
+      "what": {
+        "title": "What reaches the server",
+        "text": "From KOReader statistics — reading time and pages for each book. The server keeps one snapshot per user: on every sync a reader merges its statistics with it, so the snapshot covers all your readers.",
+        "vocabulary": "The vocabulary is synced and stored on the server too, but the panel does not show it yet."
+      },
+      "setup": {
+        "title": "Setup",
+        "version": "These steps are for KOReader 2026.07 and later (<a>why</a>).",
+        "credentials": "Username — {{username}}, password — the device password, the same as for progress sync. Leave the start folder empty."
+      },
+      "cloudStorage": {
+        "title": "Which cloud storage to use",
+        "text": "KOReader 2026.07 has two storages in the menu: <cloudStorage/> and <cloudStoragePlus/>. Statistics and the vocabulary sync only through <cloudStoragePlus/>, and the old storage has its own server list: a server added there does not appear in <cloudSync/>. Newer versions removed the old storage and kept a single <cloudStorage/> item.",
+        "old": "Versions before 2026.07 have no <cloudStoragePlus/> plugin and statistics syncs through the old storage. That path has not been tested with this server."
+      },
+      "sync": {
+        "title": "When it syncs",
+        "text": "There is no timer: sync runs manually or by a gesture assigned to it. Statistics — <readingStatistics/> → <syncNow/>. Vocabulary — the “⇅” button at the bottom of the vocabulary window or <syncNow/> in its <cloudSync/>.",
+        "disabled": "<syncNow/> in statistics stays disabled until a server is selected in <cloudSync/>."
+      },
+      "vocabulary": {
+        "title": "Vocabulary",
+        "text": "Open <vocabularyBuilder/>, tap the menu in the window title → <cloudSync/> and select the same server and folder as for statistics."
+      },
+      "upload": {
+        "title": "Uploading a file from the panel",
+        "text": "You can also upload the statistics file manually — on the <a>Devices screen</a>, in the Reading statistics card. It is statistics.sqlite3 from the KOReader settings folder. The file is merged with the statistics on the server, nothing is deleted; readers get the data on their next sync."
+      },
+      "folders": {
+        "title": "Folders on the server",
+        "text": "KOReader cannot create a folder on the server: statistics and vocabulary files live in the root. So leave the start folder empty and pick the root in <cloudSync/> — long-press <chooseFolder/>."
+      }
+    },
+    "troubleshooting": {
+      "intro": "Symptom, cause and what to do. KOReader does not translate the messages that come from the server.",
+      "loginFailed": {
+        "title": "KOReader says “Unauthorized” on login",
+        "cause": "This is the server's response: wrong username or device password, or the device has been revoked. It needs the device password, not the panel one.",
+        "fix": "Check the username. If the password is lost or the device is revoked, issue a new password or add a device on the <devices>Devices screen</devices> and log in again (<a>connecting</a>).",
+        "note": "KOReader shows “Cannot login: invalid username and password” by itself, without contacting the server: a field was left empty."
+      },
+      "tooManyAttempts": {
+        "title": "“Too many failed attempts. Try again in N minutes.” on login",
+        "cause": "After several failed logins the server temporarily blocks logins from this address.",
+        "fix": "Wait for the stated time, check the username and device password and log in again."
+      },
+      "syncRejected": {
+        "title": "Login worked, but later — “Something went wrong when syncing progress…”",
+        "cause": "The device has been revoked or issued a new password. KOReader keeps the key from the login and does not log in again, and it does not queue a rejected request: a manual push or pull shows this message, automatic sync silently sends nothing.",
+        "fix": "Issue a new password on the <devices>Devices screen</devices>, then in KOReader <logout/> → <registerLogin/> → <login/> with the new password. If the device was not revoked and the password did not change — <a>the server is unreachable</a>."
+      },
+      "noProgress": {
+        "title": "Progress does not show up in the panel",
+        "cause": "Automatic sync is off in KOReader (the default) or there was no network at the moment of sending.",
+        "fix": "Turn on <autoSync/> or send progress manually: <pushNow/>. <a>When progress is sent</a>."
+      },
+      "unknownBook": {
+        "title": "The book shows up as “Unknown book”",
+        "cause": "The server knows the book only by the file hash: <sendMetadata/> is off in KOReader and the statistics on the server do not have this book.",
+        "fix": "Turn on <sendMetadata/> (KOReader 2026.07 and later) — the title arrives with the next sync. Or set up <stats>statistics sync</stats>: the title and authors are taken from it. <a>Document metadata</a>."
+      },
+      "differentBooks": {
+        "title": "Another reader does not pick up the position",
+        "cause": "For the server these are different books: the files differ (FB2 and EPUB, metadata edited after copying) or the readers use a different <matchingMethod/>. The panel shows such files as separate books. If it is one book, the position arrived but KOReader did not apply it — that is set in <behavior>sync behavior</behavior>.",
+        "fix": "Copy the same file to all readers and use the same matching method on all of them. Details: <formats>different files of the same book</formats>, <matching>document matching</matching>."
+      },
+      "unknownServerError": {
+        "title": "“Unknown server error” on login or “Something went wrong…” on sync, though the device was not revoked",
+        "cause": "The reader could not reach the server, or a proxy in front of the server answered instead of it: with a gateway error or its own login page.",
+        "fix": "Open the address from <customServer/> in a browser on another device in the same network as the reader: this panel should open. If the device was revoked or issued a new password, “Something went wrong…” has <a>another cause</a>."
+      },
+      "statsSyncDisabled": {
+        "title": "<syncNow/> in statistics is disabled",
+        "cause": "No server is selected in the statistics <cloudSync/>.",
+        "fix": "<readingStatistics/> → <settings/> → <cloudSync/>: select the WebDAV server and the root folder. <a>Setup</a>."
+      },
+      "statsWrongStorage": {
+        "title": "The WebDAV server is added but missing from <cloudSync/>",
+        "cause": "The server was added to the old <cloudStorage/>, while in KOReader 2026.07 statistics syncs only through <cloudStoragePlus/>.",
+        "fix": "Add the server to <cloudStoragePlus/>. <a>Which storage to use</a>."
+      },
+      "statsNoTitles": {
+        "title": "Statistics arrived, but books in the panel have no titles",
+        "cause": "The reader uses <matchingFilename/> in <matchingMethod/>: statistics identifies books by the file contents, while progress then comes by file name, and the books do not match.",
+        "fix": "Turn on <sendMetadata/> — titles will come with the progress — or choose <matchingBinary/>. <a>Document matching</a>."
+      }
+    }
   }
 }

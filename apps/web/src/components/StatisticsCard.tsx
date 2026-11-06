@@ -1,10 +1,12 @@
 import type { StatisticsSnapshot } from "@ksb/api-client";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { ChartNoAxesColumn, Upload } from "lucide-react";
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { errorText, meQuery } from "@/auth";
 import { FormError } from "@/components/FormError";
+import { helpLink } from "@/components/HelpParts";
 import { WebdavSteps } from "@/components/KoreaderSetup";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -72,8 +74,11 @@ export function StatisticsCard() {
         <summary className="text-sm font-medium select-none hover:text-foreground">
           {t("statistics.setupTitle")}
         </summary>
-        <div className="pt-4">
+        <div className="flex flex-col gap-4 pt-4">
           <WebdavSteps credentials={t("statistics.credentials", { username: me?.username ?? "" })} />
+          <Link to="/help/statistics" className={`${helpLink} self-start text-sm`}>
+            {t("help.more")}
+          </Link>
         </div>
       </details>
 

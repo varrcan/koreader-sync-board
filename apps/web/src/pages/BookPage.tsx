@@ -6,6 +6,7 @@ import { ApiFailure } from "@/api";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import { BookCover } from "@/components/BookCover";
 import { BookName, ProgressBar } from "@/components/BookParts";
+import { helpLink } from "@/components/HelpParts";
 import { MenuLabel, Value } from "@/components/KoreaderSetup";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -93,7 +94,12 @@ export function BookPage() {
             <span className="font-semibold">
               {t("book.unknownTitle")} <MenuLabel item="sendMetadata" />
             </span>
-            <span className="text-pretty text-muted-foreground">{t("book.unknownText")}</span>
+            <span className="text-pretty text-muted-foreground">
+              {t("book.unknownText")}{" "}
+              <Link to="/help/troubleshooting" hash="unknown-book" className={helpLink}>
+                {t("help.more")}
+              </Link>
+            </span>
           </div>
         </div>
       )}

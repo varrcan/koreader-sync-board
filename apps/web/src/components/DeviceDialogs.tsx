@@ -1,10 +1,13 @@
 import type { Device, DeviceWithPassword, Me, UserSummary } from "@ksb/api-client";
 import { queryOptions, useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
+import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, failure } from "@/api";
 import { errorText, queryClient } from "@/auth";
 import { FormError } from "@/components/FormError";
+import { helpLink } from "@/components/HelpParts";
 import { MenuLabel, Step, Value, WebdavSteps } from "@/components/KoreaderSetup";
 import {
   AlertDialog,
@@ -259,6 +262,26 @@ export function ConfirmDeviceDialog({
 }
 
 /**
+ * «Подробнее» из карточки пароля — в новой вкладке: переход внутри панели закрыл бы
+ * карточку, а пароль больше не покажут.
+ */
+function MoreInNewTab({ to, hash }: { to: "/help/progress" | "/help/statistics"; hash: string }) {
+  const { t } = useTranslation();
+  return (
+    <Link
+      to={to}
+      hash={hash}
+      target="_blank"
+      rel="noopener"
+      className={`${helpLink} inline-flex items-center gap-1 self-start text-sm [&_svg]:size-3.5`}
+    >
+      {t("help.more")}
+      <ExternalLink />
+    </Link>
+  );
+}
+
+/**
  * Пароль показывается один раз, поэтому карточка закрывается только кнопкой:
  * клик мимо или Esc не должны терять его до того, как человек его сохранил.
  */
@@ -307,12 +330,14 @@ export function PasswordDialog({ issued, onClose }: { issued: DeviceWithPassword
               </p>
             </Step>
           </ol>
+          <MoreInNewTab to="/help/progress" hash="setup" />
         </section>
         <section className="flex flex-col gap-4">
           <h2 className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
             {t("devices.webdav.title")}
           </h2>
           <WebdavSteps credentials={t("devices.webdav.credentials")} />
+          <MoreInNewTab to="/help/statistics" hash="setup" />
         </section>
         <DialogFooter>
           <Button onClick={onClose}>{t("devices.passwordCard.done")}</Button>

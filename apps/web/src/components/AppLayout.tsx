@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useRouter } from "@tanstack/react-router";
-import { BookOpen, House, KeyRound, LogOut, TabletSmartphone } from "lucide-react";
+import { BookOpen, CircleHelp, House, KeyRound, LogOut, TabletSmartphone } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "@/api";
@@ -14,7 +14,7 @@ function NavLink({
   icon,
   children,
 }: {
-  to: "/" | "/books" | "/devices" | "/password";
+  to: "/" | "/books" | "/devices" | "/password" | "/help";
   icon: ReactNode;
   children: ReactNode;
 }) {
@@ -23,7 +23,7 @@ function NavLink({
       to={to}
       className="flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground [&_svg]:size-4.5"
       activeProps={{ className: "bg-accent font-medium text-foreground" }}
-      // «Книги» подсвечены и в карточке книги.
+      // «Книги» подсвечены и в карточке книги, «Справка» — на её страницах.
       activeOptions={{ exact: to === "/", includeSearch: false }}
     >
       {icon}
@@ -92,6 +92,9 @@ export function AppLayout() {
           <NavLink to="/password" icon={<KeyRound />}>
             {t("nav.password")}
           </NavLink>
+          <NavLink to="/help" icon={<CircleHelp />}>
+            {t("nav.help")}
+          </NavLink>
         </nav>
         <div className="mt-auto flex flex-col gap-3 border-t px-2 pt-4">
           <div className="flex items-center justify-between gap-2">
@@ -105,7 +108,7 @@ export function AppLayout() {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-3 border-b bg-sidebar px-4 py-3 md:hidden">
           <Link to="/">
-            <Logo />
+            <Logo compact />
           </Link>
           <div className="flex items-center gap-1">
             <LanguageSelect />
@@ -126,6 +129,11 @@ export function AppLayout() {
             <Button variant="ghost" size="icon-sm" asChild title={t("nav.password")} aria-label={t("nav.password")}>
               <Link to="/password">
                 <KeyRound />
+              </Link>
+            </Button>
+            <Button variant="ghost" size="icon-sm" asChild title={t("nav.help")} aria-label={t("nav.help")}>
+              <Link to="/help" activeProps={{ className: "bg-accent text-foreground" }}>
+                <CircleHelp />
               </Link>
             </Button>
             {logoutButton}

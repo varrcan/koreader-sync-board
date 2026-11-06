@@ -1,5 +1,5 @@
 // Инициализация i18next для веб-панели.
-import i18n from "i18next";
+import i18n, { type ParseKeys } from "i18next";
 import { initReactI18next } from "react-i18next";
 import en from "./locales/en.json";
 import ru from "./locales/ru.json";
@@ -15,6 +15,10 @@ declare module "i18next" {
     };
   }
 }
+
+/** Ключ и структура каталога — для компонентов, которые принимают ключ перевода в пропсах. */
+export type TranslationKey = ParseKeys;
+export type Translation = typeof ru;
 
 export const SUPPORTED_LANGUAGES = ["ru", "en"] as const;
 export type Language = (typeof SUPPORTED_LANGUAGES)[number];

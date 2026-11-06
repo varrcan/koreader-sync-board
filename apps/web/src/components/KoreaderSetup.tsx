@@ -17,14 +17,33 @@ const koreaderMenu = {
   cloudSync: "Cloud sync",
   chooseFolder: "Long-press here to choose current folder",
   syncNow: "Sync now",
+  autoSync: "Automatically keep documents in sync",
+  // Строки с %1 в KOReader показываются без подставленного значения.
+  syncEveryPages: "Periodically sync every # pages",
+  syncBehavior: "Sync behavior",
+  syncNewer: "Sync to a newer state",
+  syncOlder: "Sync to an older state",
+  pushNow: "Push progress from this device now",
+  pullNow: "Pull progress from other devices now",
+  matchingMethod: "Document matching method",
+  matchingBinary: "Binary. Only identical files will be kept in sync.",
+  matchingFilename: "Filename. Files with matching names will be kept in sync.",
+  network: "Network",
+  wifiAction: "Action when Wi-Fi is off",
+  turnOn: "Turn on",
+  cloudStoragePlus: "Cloud storage+",
+  vocabularyBuilder: "Vocabulary builder",
+  logout: "Logout",
 } as const;
+
+export type MenuItem = keyof typeof koreaderMenu;
 
 /** Адрес WebDAV для облачной синхронизации KOReader: тот же origin, что у панели. */
 export function webdavAddress(): string {
   return `${window.location.origin}/dav`;
 }
 
-export function MenuLabel({ item }: { item: keyof typeof koreaderMenu }) {
+export function MenuLabel({ item }: { item: MenuItem }) {
   const { t } = useTranslation();
   const local = t(`devices.koreader.menu.${item}`);
   const original = koreaderMenu[item];
@@ -35,6 +54,11 @@ export function MenuLabel({ item }: { item: keyof typeof koreaderMenu }) {
     </span>
   );
 }
+
+/** Пункты меню для Trans: в тексте перевода пишется <autoSync/>. */
+export const menuComponents = Object.fromEntries(
+  (Object.keys(koreaderMenu) as MenuItem[]).map((item) => [item, <MenuLabel item={item} />]),
+);
 
 /** Значение, которое переписывают в читалку, с кнопкой копирования. */
 export function Value({ label, value, large }: { label?: string; value: string; large?: boolean }) {

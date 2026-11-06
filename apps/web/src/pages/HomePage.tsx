@@ -9,6 +9,7 @@ import { ActivityFeed } from "@/components/ActivityFeed";
 import { BookCover } from "@/components/BookCover";
 import { BookName, BookRow, ProgressBar } from "@/components/BookParts";
 import { devicesQuery } from "@/components/DeviceDialogs";
+import { HelpTrans, helpLink } from "@/components/HelpParts";
 import { MenuLabel, Value } from "@/components/KoreaderSetup";
 import { Button } from "@/components/ui/button";
 import { deviceLabel, formatPercent } from "@/lib/books";
@@ -120,7 +121,12 @@ function EmptyHome({ username }: { username: string }) {
         <Step n={3}>
           <div className="flex flex-1 flex-col gap-1">
             <div className="text-[15px] font-semibold">{t("home.empty.step3Title")}</div>
-            <div className="text-sm text-muted-foreground">{t("home.empty.step3Text")}</div>
+            <p className="text-sm text-pretty text-muted-foreground">
+              <HelpTrans k="home.empty.step3Text" />{" "}
+              <Link to="/help/progress" hash="auto-sync" className={helpLink}>
+                {t("help.more")}
+              </Link>
+            </p>
           </div>
         </Step>
       </ol>

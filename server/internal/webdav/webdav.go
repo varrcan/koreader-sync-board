@@ -188,7 +188,12 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request, p accounts.Princip
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+			return
 		}
+		// Без ответа net/http отдал бы 200, и KOReader счёл бы файл выгруженным:
+		// сохранил бы его как прошлую выгрузку (.sync) и при следующей
+		// синхронизации удалил бы у себя книги, которых нет в старом снимке.
+		http.Error(w, "cannot read request body", http.StatusBadRequest)
 		return
 	}
 	if h.beforeWrite != nil {

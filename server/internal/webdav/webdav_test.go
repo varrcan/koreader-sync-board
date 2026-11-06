@@ -509,3 +509,21 @@ func TestMethods(t *testing.T) {
 		}
 	}
 }
+
+type failingBody struct{}
+
+func (failingBody) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+// TestPutBodyReadError: оборванное тело не должно получить 2xx — KOReader счёл бы
+// выгрузку успешной.
+func TestPutBodyReadError(t *testing.T) {
+	e := newEnv(t)
+	hr := httptest.NewRequest("PUT", "/dav/statistics.sqlite3", failingBody{})
+	hr.SetBasicAuth("alice", e.pass["alice/Kobo"])
+	w := httptest.NewRecorder()
+	e.h.ServeHTTP(w, hr)
+	expect(t, "broken body", w, http.StatusBadRequest)
+	if _, err := e.stats.Get(e.ctx, 1, statistics.FileStatistics); err == nil {
+		t.Fatal("file stored")
+	}
+}

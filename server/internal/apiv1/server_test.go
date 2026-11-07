@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
+	"github.com/varrcan/koreader-sync-board/server/internal/library"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
@@ -67,8 +68,15 @@ func newEnv(t *testing.T, statsOpts ...statistics.Option) *env {
 	acc := accounts.New(db, accounts.WithArgon2Params(accounts.TestArgon2Params), accounts.WithLimiter(lim))
 	setup := panelauth.NewSetup(acc, lim)
 	stats := statistics.New(db, t.TempDir(), log, statsOpts...)
+	lib := library.NewStore(db)
+	scanner := library.NewScanner(lib, 0, log)
+	scanCtx, stopScanner := context.WithCancel(ctx)
+	scannerDone := make(chan struct{})
+	go func() { scanner.Run(scanCtx); close(scannerDone) }()
+	t.Cleanup(func() { stopScanner(); <-scannerDone })
 	api := &Server{Accounts: acc, Auth: panelauth.New(acc, nil, log), Setup: setup,
-		Progress: progress.New(db), Statistics: stats, Log: log}
+		Progress: progress.New(db), Statistics: stats, Log: log,
+		Library: Library{Store: lib, Scanner: scanner}}
 	srv := httptest.NewServer(NewHandler(api))
 	t.Cleanup(srv.Close)
 	return &env{t: t, ctx: ctx, url: srv.URL, db: db, acc: acc, setup: setup, stats: stats, logs: logs, srv: api}

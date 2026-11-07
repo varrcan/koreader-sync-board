@@ -17,6 +17,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/clientip"
 	"github.com/varrcan/koreader-sync-board/server/internal/config"
 	"github.com/varrcan/koreader-sync-board/server/internal/kosync"
+	"github.com/varrcan/koreader-sync-board/server/internal/library"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
@@ -74,6 +75,8 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	ip := clientip.New(cfg.TrustedProxies)
 	prog := progress.New(db)
 	stats := statistics.New(db, cfg.DataDir, log)
+	lib := library.NewStore(db)
+	scanner := library.NewScanner(lib, cfg.LibraryScanInterval, log)
 	handler := server.New(server.Handlers{
 		Kosync: kosync.New(acc, prog, kosync.Options{
 			Registration: cfg.KosyncRegistration,
@@ -86,6 +89,7 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 			Setup:      setup,
 			Progress:   prog,
 			Statistics: stats,
+			Library:    apiv1.Library{Store: lib, Scanner: scanner},
 			Log:        log,
 			SSO:        provider,
 
@@ -104,11 +108,18 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 		ErrorLog:          slog.NewLogLogger(log.Handler(), slog.LevelWarn),
 	}
 
+	scanCtx, stopScan := context.WithCancel(ctx)
+	scanDone := make(chan struct{})
+	go func() { scanner.Run(scanCtx); close(scanDone) }()
+	// Выполняется до db.Close (defer выше): закрыть базу под работающим сканером нельзя.
+	defer waitScanner(stopScan, scanDone, scannerStopTimeout, log)
+
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	log.Info("server started", "listen", cfg.Listen, "data_dir", cfg.DataDir,
 		"version", buildinfo.Version, "kosync_registration", cfg.KosyncRegistration,
-		"kosync_self_delete", cfg.KosyncSelfDelete, "trusted_proxies", fmt.Sprint(cfg.TrustedProxies))
+		"kosync_self_delete", cfg.KosyncSelfDelete, "trusted_proxies", fmt.Sprint(cfg.TrustedProxies),
+		"library_scan_interval", cfg.LibraryScanInterval)
 
 	select {
 	case err := <-errc:
@@ -122,6 +133,21 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 		return err
 	}
 	return nil
+}
+
+// scannerStopTimeout — сколько остановка сервера ждёт сканер библиотеки.
+const scannerStopTimeout = 5 * time.Second
+
+// waitScanner останавливает сканер и ждёт его не дольше timeout. Отмена контекста
+// не прерывает зависший системный вызов (hard-mount NFS): без предела сервер нельзя
+// было бы остановить. Теряется незакоммиченный пакет, следующий скан его повторит.
+func waitScanner(stop context.CancelFunc, done <-chan struct{}, timeout time.Duration, log *slog.Logger) {
+	stop()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		log.Warn("library: scanner did not stop", "timeout", timeout)
+	}
 }
 
 // openDB открывает базу в каталоге данных, создавая каталог при необходимости.

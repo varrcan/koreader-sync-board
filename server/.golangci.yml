@@ -15,6 +15,7 @@ linters:
         - (*database/sql.Stmt).Close
         - (*database/sql.Tx).Rollback
         - (*os.File).Close
+        - (*archive/zip.ReadCloser).Close
         - (io.Closer).Close
         - os.Remove
         - os.RemoveAll

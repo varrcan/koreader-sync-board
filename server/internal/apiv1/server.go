@@ -24,6 +24,7 @@ type Server struct {
 	Setup      *panelauth.Setup
 	Progress   *progress.Store
 	Statistics *statistics.Store
+	Library    Library
 	Log        *slog.Logger
 	// SSO — OIDC-провайдер; nil — OIDC не настроен, его эндпоинты отвечают 404.
 	SSO *sso.Provider

@@ -1,6 +1,15 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useRouter } from "@tanstack/react-router";
-import { BookOpen, ChartNoAxesColumn, CircleHelp, House, LogOut, TabletSmartphone, UserRound } from "lucide-react";
+import {
+  BookOpen,
+  ChartNoAxesColumn,
+  CircleHelp,
+  House,
+  Library,
+  LogOut,
+  TabletSmartphone,
+  UserRound,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "@/api";
@@ -14,7 +23,7 @@ function NavLink({
   icon,
   children,
 }: {
-  to: "/" | "/books" | "/statistics" | "/devices" | "/account" | "/help";
+  to: "/" | "/books" | "/library" | "/statistics" | "/devices" | "/account" | "/help";
   icon: ReactNode;
   children: ReactNode;
 }) {
@@ -85,6 +94,9 @@ export function AppLayout() {
           </NavLink>
           <NavLink to="/books" icon={<BookOpen />}>
             {t("nav.books")}
+          </NavLink>
+          <NavLink to="/library" icon={<Library />}>
+            {t("nav.library")}
           </NavLink>
           <NavLink to="/statistics" icon={<ChartNoAxesColumn />}>
             {t("nav.statistics")}

@@ -39,6 +39,9 @@ export type ReadingSession = Schemas["ReadingSession"];
 export type ReadingSessionPage = Schemas["ReadingSessionPage"];
 export type BookReadingStats = Schemas["BookReadingStats"];
 export type BookStatistics = Schemas["BookStatistics"];
+export type LibrarySummary = Schemas["LibrarySummary"];
+export type LibraryScan = Schemas["LibraryScan"];
+export type LibraryRoot = Schemas["LibraryRoot"];
 
 export type ApiClient = ReturnType<typeof createApiClient>;
 

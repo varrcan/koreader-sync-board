@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func env(m map[string]string) func(string) string {
@@ -16,7 +17,7 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Config{Listen: ":8080", DataDir: "/data", PanelPasswordLogin: true}
+	want := Config{Listen: ":8080", DataDir: "/data", PanelPasswordLogin: true, LibraryScanInterval: 6 * time.Hour}
 	if !reflect.DeepEqual(c, want) {
 		t.Fatalf("got %+v, want %+v", c, want)
 	}
@@ -40,7 +41,7 @@ func TestLoadOverrides(t *testing.T) {
 		KosyncRegistration: true, KosyncSelfDelete: true,
 		TrustedProxies: []netip.Prefix{netip.MustParsePrefix("10.0.0.0/8"), netip.MustParsePrefix("192.168.1.10/32")},
 		AdminUser:      "root", AdminPassword: "secret",
-		PanelPasswordLogin: true,
+		PanelPasswordLogin: true, LibraryScanInterval: 6 * time.Hour,
 	}
 	if !reflect.DeepEqual(c, want) {
 		t.Fatalf("got %+v, want %+v", c, want)
@@ -57,6 +58,21 @@ func TestLoadInvalidTrustedProxies(t *testing.T) {
 	_, err := Load(env(map[string]string{"KSB_TRUSTED_PROXIES": "10.0.0.0/8, proxy.lan"}))
 	if err == nil || !strings.Contains(err.Error(), "KSB_TRUSTED_PROXIES") || !strings.Contains(err.Error(), `"proxy.lan"`) {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadLibraryScanInterval(t *testing.T) {
+	for v, want := range map[string]time.Duration{"0": 0, "30m": 30 * time.Minute, "1m": time.Minute} {
+		c, err := Load(env(map[string]string{"KSB_LIBRARY_SCAN_INTERVAL": v}))
+		if err != nil || c.LibraryScanInterval != want {
+			t.Fatalf("%q: %v, %v", v, c.LibraryScanInterval, err)
+		}
+	}
+	for v, msg := range map[string]string{"-1h": "negative", "10s": "at least one minute", "6": "invalid duration"} {
+		_, err := Load(env(map[string]string{"KSB_LIBRARY_SCAN_INTERVAL": v}))
+		if err == nil || !strings.Contains(err.Error(), "KSB_LIBRARY_SCAN_INTERVAL") || !strings.Contains(err.Error(), msg) {
+			t.Fatalf("%q: %v", v, err)
+		}
 	}
 }
 

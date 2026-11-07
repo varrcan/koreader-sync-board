@@ -14,6 +14,7 @@ import { HelpProgressPage } from "./pages/help/HelpProgressPage";
 import { HelpStatisticsPage } from "./pages/help/HelpStatisticsPage";
 import { HelpTroubleshootingPage } from "./pages/help/HelpTroubleshootingPage";
 import { HomePage } from "./pages/HomePage";
+import { LibraryPage } from "./pages/LibraryPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SetupPage } from "./pages/SetupPage";
 import { StatisticsPage } from "./pages/StatisticsPage";
@@ -97,6 +98,12 @@ const bookRoute = createRoute({
   component: BookPage,
 });
 
+const libraryRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/library",
+  component: LibraryPage,
+});
+
 const statisticsPeriods: readonly string[] = ["week", "month", "year"] satisfies StatisticsPeriod[];
 
 const statisticsRoute = createRoute({
@@ -170,6 +177,7 @@ const routeTree = rootRoute.addChildren([
     indexRoute,
     booksRoute,
     bookRoute,
+    libraryRoute,
     statisticsRoute,
     devicesRoute,
     accountRoute,

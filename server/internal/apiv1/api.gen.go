@@ -189,11 +189,15 @@ type AuthMethodsPassword string
 
 // Book defines model for Book.
 type Book struct {
+	// Authors Из тех же источников и в том же порядке, что `title`.
 	Authors *string `json:"authors"`
 
 	// DeviceName Имя устройства последней синхронизации в панели; `null`, если устройство удалено.
 	DeviceName *string `json:"device_name"`
-	Filename   *string `json:"filename"`
+
+	// Filename Из `metadata` синхронизаций, а если её не было — имя файла библиотеки с этим
+	// хешем (без каталогов).
+	Filename *string `json:"filename"`
 
 	// Finished Процент при показе с одним знаком округляется до 100 % (≥ 0,9995).
 	Finished bool `json:"finished"`
@@ -212,7 +216,8 @@ type Book struct {
 	ReportedDevice string `json:"reported_device"`
 
 	// Title Из `metadata` синхронизаций этого пользователя, а если её не было — из его
-	// статистики чтения по тому же хешу.
+	// статистики чтения по тому же хешу, а затем из книги библиотеки, которой
+	// принадлежит файл с этим хешем.
 	Title *string `json:"title"`
 
 	// UpdatedAt Время получения последней синхронизации.
@@ -317,6 +322,15 @@ type CreateDeviceRequest struct {
 	Username *string `json:"username,omitempty"`
 }
 
+// CreateLibraryRootRequest defines model for CreateLibraryRootRequest.
+type CreateLibraryRootRequest struct {
+	// Name Пустое или отсутствующее — последний элемент пути.
+	Name *string `json:"name,omitempty"`
+
+	// Path Example: /books
+	Path string `json:"path"`
+}
+
 // Device defines model for Device.
 type Device struct {
 	CreatedAt  time.Time  `json:"created_at"`
@@ -367,6 +381,50 @@ type Health struct {
 
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
+
+// LibraryRoot defines model for LibraryRoot.
+type LibraryRoot struct {
+	// Error Ошибка последнего скана; `null`, если он прошёл без ошибок.
+	Error *string `json:"error"`
+
+	// Files Число проиндексированных файлов.
+	Files int    `json:"files"`
+	Id    int64  `json:"id"`
+	Name  string `json:"name"`
+
+	// Path Абсолютный путь на сервере.
+	//
+	// Example: /books
+	Path string `json:"path"`
+
+	// ScannedAt Конец последнего завершённого скана; `null`, если корень ещё не сканировался.
+	ScannedAt *time.Time `json:"scanned_at"`
+}
+
+// LibraryRootList defines model for LibraryRootList.
+type LibraryRootList struct {
+	Items []LibraryRoot `json:"items"`
+}
+
+// LibraryScan defines model for LibraryScan.
+type LibraryScan struct {
+	// FinishedAt Конец последнего завершённого скана корня; `null`, если сканов не было.
+	FinishedAt *time.Time `json:"finished_at"`
+
+	// Running Скан идёт или поставлен в очередь.
+	Running bool `json:"running"`
+
+	// StartedAt Начало текущего скана; `null`, если скан не идёт.
+	StartedAt *time.Time `json:"started_at"`
+}
+
+// LibrarySummary defines model for LibrarySummary.
+type LibrarySummary struct {
+	Books int         `json:"books"`
+	Files int         `json:"files"`
+	Roots int         `json:"roots"`
+	Scan  LibraryScan `json:"scan"`
+}
 
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
@@ -614,6 +672,9 @@ type Cursor = string
 // DeviceID defines model for DeviceID.
 type DeviceID = int64
 
+// LibraryRootID defines model for LibraryRootID.
+type LibraryRootID = int64
+
 // Limit defines model for Limit.
 type Limit = int
 
@@ -732,6 +793,9 @@ type CreateDeviceJSONRequestBody = CreateDeviceRequest
 // RenameDeviceJSONRequestBody defines body for RenameDevice for application/json ContentType.
 type RenameDeviceJSONRequestBody = RenameDeviceRequest
 
+// CreateLibraryRootJSONRequestBody defines body for CreateLibraryRoot for application/json ContentType.
+type CreateLibraryRootJSONRequestBody = CreateLibraryRootRequest
+
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody = ChangePasswordRequest
 
@@ -785,6 +849,21 @@ type ServerInterface interface {
 	// GetHealth Проверка работоспособности
 	// (GET /api/v1/health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// GetLibrary Сводка библиотеки
+	// (GET /api/v1/library)
+	GetLibrary(w http.ResponseWriter, r *http.Request)
+	// ListLibraryRoots Корни библиотеки
+	// (GET /api/v1/library/roots)
+	ListLibraryRoots(w http.ResponseWriter, r *http.Request)
+	// CreateLibraryRoot Добавить корень
+	// (POST /api/v1/library/roots)
+	CreateLibraryRoot(w http.ResponseWriter, r *http.Request)
+	// DeleteLibraryRoot Удалить корень
+	// (DELETE /api/v1/library/roots/{id})
+	DeleteLibraryRoot(w http.ResponseWriter, r *http.Request, id LibraryRootID)
+	// ScanLibrary Сканировать библиотеку
+	// (POST /api/v1/library/scan)
+	ScanLibrary(w http.ResponseWriter, r *http.Request)
 	// GetMe Текущий пользователь
 	// (GET /api/v1/me)
 	GetMe(w http.ResponseWriter, r *http.Request)
@@ -1288,6 +1367,88 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// GetLibrary operation middleware
+func (siw *ServerInterfaceWrapper) GetLibrary(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLibrary(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListLibraryRoots operation middleware
+func (siw *ServerInterfaceWrapper) ListLibraryRoots(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLibraryRoots(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateLibraryRoot operation middleware
+func (siw *ServerInterfaceWrapper) CreateLibraryRoot(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateLibraryRoot(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteLibraryRoot operation middleware
+func (siw *ServerInterfaceWrapper) DeleteLibraryRoot(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id LibraryRootID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteLibraryRoot(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ScanLibrary operation middleware
+func (siw *ServerInterfaceWrapper) ScanLibrary(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ScanLibrary(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetMe operation middleware
 func (siw *ServerInterfaceWrapper) GetMe(w http.ResponseWriter, r *http.Request) {
 
@@ -1714,6 +1875,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/statistics/summary", wrapper.GetStatisticsSummary)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/statistics/calendar", wrapper.GetStatisticsCalendar)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/statistics/sessions", wrapper.ListReadingSessions)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library", wrapper.GetLibrary)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/roots", wrapper.ListLibraryRoots)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/roots", wrapper.CreateLibraryRoot)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/library/roots/{id}", wrapper.DeleteLibraryRoot)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/scan", wrapper.ScanLibrary)
 
 	return m
 }

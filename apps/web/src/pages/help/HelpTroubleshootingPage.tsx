@@ -34,6 +34,7 @@ export function HelpTroubleshootingPage() {
         problem="unknownBook"
         components={{
           stats: <Link to="/help/statistics" hash="setup" className={helpLink} />,
+          library: <Link to="/library" className={helpLink} />,
           a: <Link to="/help/progress" hash="metadata" className={helpLink} />,
         }}
       />
@@ -64,7 +65,10 @@ export function HelpTroubleshootingPage() {
       <ProblemItem
         id="stats-no-titles"
         problem="statsNoTitles"
-        components={{ a: <Link to="/help/progress" hash="matching" className={helpLink} /> }}
+        components={{
+          library: <Link to="/library" className={helpLink} />,
+          a: <Link to="/help/progress" hash="matching" className={helpLink} />,
+        }}
       />
     </HelpPage>
   );

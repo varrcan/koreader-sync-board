@@ -175,3 +175,49 @@ func TestDeleteUserCascadesStatistics(t *testing.T) {
 		}
 	}
 }
+
+// TestMigrateLibraryOverExistingData: 0007 применяется к базе с данными 0006 и
+// не трогает их.
+func TestMigrateLibraryOverExistingData(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mustExec := func(q string) {
+		t.Helper()
+		if _, err := db.Write.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, table := range []string{"library_file_hashes", "library_files", "library_book_keys", "library_books", "library_roots"} {
+		mustExec(`DROP TABLE ` + table)
+	}
+	mustExec(`DELETE FROM schema_migrations WHERE version = 7`)
+	mustExec(`INSERT INTO users (id, username, role, created_at, oidc_issuer, oidc_subject) VALUES (1, 'u', 'user', 0, 'i', 's')`)
+	mustExec(`INSERT INTO documents (id, hash, first_seen_at) VALUES (1, 'h', 0)`)
+	mustExec(`INSERT INTO progress_events (user_id, document_id, percentage, progress, device, server_ts) VALUES (1, 1, 0.1, 'p', 'd', 0)`)
+
+	if err := Migrate(ctx, db.Write); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.Read.QueryRowContext(ctx, `SELECT count(*) FROM progress_events JOIN users ON users.id = user_id WHERE oidc_subject = 's'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("existing data: %d, %v", n, err)
+	}
+	mustExec(`INSERT INTO library_roots (id, name, path, created_at) VALUES (1, 'books', '/books', 0)`)
+	mustExec(`INSERT INTO library_books (id, created_at) VALUES (1, 0)`)
+	mustExec(`INSERT INTO library_book_keys (key, book_id) VALUES ('k', 1)`)
+	mustExec(`INSERT INTO library_files (id, root_id, path, size, mtime_ns, format, partial_md5, book_id, indexed_at) VALUES (1, 1, 'a.epub', 1, 1, 'epub', 'h', 1, 0)`)
+	mustExec(`INSERT INTO library_file_hashes (hash, file_id) VALUES ('h', 1)`)
+	// Корень уносит файлы и их хеши каскадом; книгу без файлов убирает сканер.
+	mustExec(`DELETE FROM library_roots`)
+	if err := db.Read.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM library_files) + (SELECT count(*) FROM library_file_hashes)`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("after root delete: %d, %v", n, err)
+	}
+	mustExec(`DELETE FROM library_books`)
+	if err := db.Read.QueryRowContext(ctx, `SELECT count(*) FROM library_book_keys`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("keys after book delete: %d, %v", n, err)
+	}
+}

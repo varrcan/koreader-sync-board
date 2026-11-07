@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/clientip"
 )
@@ -36,6 +37,10 @@ type Config struct {
 	// OIDC (KSB_PANEL_PASSWORD_LOGIN, по умолчанию true). Непривязанные входят
 	// паролем всегда.
 	PanelPasswordLogin bool
+
+	// LibraryScanInterval — период скана библиотеки (KSB_LIBRARY_SCAN_INTERVAL,
+	// по умолчанию 6h); 0 — только вручную и при добавлении корня.
+	LibraryScanInterval time.Duration
 }
 
 // OIDC — настройки OIDC-провайдера панели.
@@ -67,6 +72,8 @@ func Defaults() Config {
 		DataDir: "/data",
 
 		PanelPasswordLogin: true,
+
+		LibraryScanInterval: 6 * time.Hour,
 	}
 }
 
@@ -111,7 +118,27 @@ func Load(getenv func(string) string) (Config, error) {
 	if !c.PanelPasswordLogin && c.OIDC == nil {
 		return Config{}, fmt.Errorf("KSB_PANEL_PASSWORD_LOGIN=false requires OIDC: set KSB_OIDC_ISSUER, KSB_OIDC_CLIENT_ID and KSB_PUBLIC_URL")
 	}
+	if v := getenv("KSB_LIBRARY_SCAN_INTERVAL"); v != "" {
+		if c.LibraryScanInterval, err = parseScanInterval(v); err != nil {
+			return Config{}, fmt.Errorf("KSB_LIBRARY_SCAN_INTERVAL: %w", err)
+		}
+	}
 	return c, nil
+}
+
+// parseScanInterval разбирает период скана библиотеки. Период меньше минуты,
+// кроме 0, — почти наверняка опечатка: частый обход NAS бессмыслен.
+func parseScanInterval(v string) (time.Duration, error) {
+	d, err := time.ParseDuration(v)
+	switch {
+	case err != nil:
+		return 0, fmt.Errorf("invalid duration %q (use Go duration format: 30m, 6h; 0 disables)", v)
+	case d < 0:
+		return 0, fmt.Errorf("%q must not be negative", v)
+	case d > 0 && d < time.Minute:
+		return 0, fmt.Errorf("%q: period must be at least one minute (0 disables periodic scans)", v)
+	}
+	return d, nil
 }
 
 // loadOIDC читает KSB_OIDC_* и KSB_PUBLIC_URL; без всех трёх обязательных — nil.

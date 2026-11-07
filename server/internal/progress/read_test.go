@@ -406,6 +406,95 @@ func TestTitleFromStatistics(t *testing.T) {
 	}
 }
 
+// libFile добавляет в библиотеку файл path книги title с хешами hashes, как после
+// скана; пустое title — книга без названия. Возвращает id файла.
+func (e *readEnv) libFile(path, title, authors string, hashes ...string) int64 {
+	e.t.Helper()
+	db := e.s.db.Write
+	exec := func(q string, args ...any) int64 {
+		e.t.Helper()
+		res, err := db.ExecContext(e.ctx, q, args...)
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		id, _ := res.LastInsertId()
+		return id
+	}
+	exec(`INSERT INTO library_roots (id, name, path, created_at) VALUES (1, 'books', '/books', 0) ON CONFLICT DO NOTHING`)
+	book := exec(`INSERT INTO library_books (title, authors, created_at) VALUES (nullif(?, ''), nullif(?, ''), 0)`, title, authors)
+	file := exec(`INSERT INTO library_files (root_id, path, size, mtime_ns, format, partial_md5, book_id, indexed_at)
+		VALUES (1, ?, 1, 1, 'epub', ?, ?, 0)`, path, hashes[0], book)
+	for _, h := range hashes {
+		exec(`INSERT INTO library_file_hashes (hash, file_id) VALUES (?, ?)`, h, file)
+	}
+	return file
+}
+
+func TestTitleFromLibrary(t *testing.T) {
+	e := newReadEnv(t)
+	alice := e.user("alice")
+	pb := e.device("alice", "pocketbook")
+	e.sync(pb, "partial", 0.1, time.Minute, Metadata{})
+	e.sync(pb, "byname", 0.2, time.Minute, Metadata{})
+	e.sync(pb, "pdf", 0.3, time.Minute, Metadata{})
+	e.sync(pb, "stat", 0.4, time.Minute, Metadata{})
+	e.sync(pb, "meta", 0.5, time.Minute, Metadata{Title: "Meta title", Filename: "meta.epub"})
+	e.sync(pb, "unknown", 0.6, time.Minute, Metadata{})
+
+	e.libFile("fantasy/Пикник.epub", "Пикник на обочине", "Стругацкие", "partial", "byname")
+	e.libFile("scans/a.pdf", "", "", "pdf")
+	e.libFile("stat.epub", "Lib title", "Lib author", "stat")
+	e.libFile("m/meta-lib.epub", "Lib meta", "Lib meta author", "meta")
+	e.statBook(alice, "stat", "Stat title", "Stat author", 100)
+
+	page := e.books(alice, FilterAll, 0, 50)
+	got := map[string]Book{}
+	for _, b := range page.Items {
+		got[b.Hash] = b
+	}
+	check := func(hash, title, authors, filename string) {
+		t.Helper()
+		b := got[hash]
+		if str(b.Title) != title || str(b.Authors) != authors || str(b.Filename) != filename {
+			t.Errorf("%s: title %s, authors %s, filename %s", hash, str(b.Title), str(b.Authors), str(b.Filename))
+		}
+	}
+	// Хеш partial MD5 и хеш имени файла (режим Filename) ведут к одному файлу.
+	check("partial", "Пикник на обочине", "Стругацкие", "Пикник.epub")
+	check("byname", "Пикник на обочине", "Стругацкие", "Пикник.epub")
+	check("pdf", "<nil>", "<nil>", "a.pdf")
+	check("stat", "Stat title", "Stat author", "stat.epub")
+	check("meta", "Meta title", "Lib meta author", "meta.epub")
+	check("unknown", "<nil>", "<nil>", "<nil>")
+	if page.Counts.Unknown != 1 {
+		t.Errorf("unknown count %d, want 1", page.Counts.Unknown)
+	}
+	if u := hashes(e.books(alice, FilterUnknown, 0, 50).Items); u != "unknown" {
+		t.Errorf("unknown filter %s", u)
+	}
+
+	b, _, err := e.s.Book(e.ctx, alice, "byname")
+	if err != nil || str(b.Title) != "Пикник на обочине" || str(b.Filename) != "Пикник.epub" {
+		t.Fatalf("book card: %+v %v", b, err)
+	}
+	a := e.activity(alice, "pdf", 0, 10)
+	if len(a.Items) != 1 || a.Items[0].Title != nil || str(a.Items[0].Filename) != "a.pdf" {
+		t.Fatalf("activity: %+v", a.Items)
+	}
+	a = e.activity(alice, "partial", 0, 10)
+	if len(a.Items) != 1 || str(a.Items[0].Title) != "Пикник на обочине" || str(a.Items[0].Authors) != "Стругацкие" {
+		t.Fatalf("activity: %+v", a.Items)
+	}
+
+	// Файл ушёл из индекса — книга снова неизвестная.
+	if _, err := e.s.db.Write.ExecContext(e.ctx, `DELETE FROM library_files WHERE path = 'scans/a.pdf'`); err != nil {
+		t.Fatal(err)
+	}
+	if u := hashes(e.books(alice, FilterUnknown, 0, 50).Items); u != "unknown,pdf" {
+		t.Errorf("unknown after delete %s", u)
+	}
+}
+
 func TestToday(t *testing.T) {
 	e := newReadEnv(t)
 	e.user("alice")

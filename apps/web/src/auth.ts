@@ -77,6 +77,9 @@ export function errorText(t: TFunction, err: unknown): string {
     case "forbidden":
     case "device_exists":
     case "invalid_device_name":
+    case "invalid_path":
+    case "root_exists":
+    case "root_overlap":
     case "invalid_statistics":
     case "file_too_large":
     case "conflict":

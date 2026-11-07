@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"math"
+	"path"
 	"time"
 )
 
@@ -28,7 +29,8 @@ const (
 )
 
 // Book — книга пользователя: метаданные из его синхронизаций (название и авторы,
-// если их не было, — из его статистики чтения) и последнее событие.
+// если их не было, — из его статистики чтения, а затем из библиотеки; имя файла —
+// из библиотеки) и последнее событие.
 type Book struct {
 	Hash                     string
 	Title, Authors, Filename *string
@@ -86,9 +88,21 @@ const statBook = `LEFT JOIN stat_books st ON st.id = (
 		WHERE s.user_id = c.user_id AND s.document_id = c.document_id AND s.title <> ''
 		ORDER BY s.last_open DESC, s.id DESC LIMIT 1)`
 
+// libBook — файл библиотеки с тем же хешем (partial MD5 или md5 имени) и его
+// книга; при нескольких файлах — с наименьшим id. Библиотека — последний
+// источник названия: metadata и статистика принадлежат самому пользователю.
+const libBook = `LEFT JOIN library_files lf ON lf.id = (
+		SELECT h.file_id FROM library_file_hashes h WHERE h.hash = d.hash
+		ORDER BY h.file_id LIMIT 1)
+	LEFT JOIN library_books lb ON lb.id = lf.book_id`
+
+// unknownCond: файл в библиотеке даёт книге хотя бы имя, такая книга известна.
 const unknownCond = `c.meta_title IS NULL AND c.meta_filename IS NULL AND NOT EXISTS (
 		SELECT 1 FROM stat_books s
-		WHERE s.user_id = c.user_id AND s.document_id = c.document_id AND s.title <> '')`
+		WHERE s.user_id = c.user_id AND s.document_id = c.document_id AND s.title <> '')
+	AND NOT EXISTS (
+		SELECT 1 FROM library_file_hashes h
+		WHERE h.hash = (SELECT hash FROM documents WHERE id = c.document_id))`
 
 var filterCond = map[Filter]string{
 	FilterAll:      ``,
@@ -103,13 +117,19 @@ func ValidFilter(f Filter) bool {
 	return ok
 }
 
-const bookColumns = `d.hash, coalesce(c.meta_title, st.title), coalesce(c.meta_authors, st.authors), c.meta_filename,
+// metaColumns — название, авторы, имя файла из синхронизаций и путь файла
+// библиотеки: базовое имя берётся в Go (fileName), в SQLite нет надёжного basename.
+const metaColumns = `coalesce(c.meta_title, st.title, lb.title), coalesce(c.meta_authors, st.authors, lb.authors),
+	c.meta_filename, lf.path`
+
+const bookColumns = `d.hash, ` + metaColumns + `,
 	e.percentage, e.server_ts, cr.name, e.device, c.event_id
 	FROM progress_current c
 	JOIN documents d ON d.id = c.document_id
 	JOIN progress_events e ON e.id = c.event_id
 	LEFT JOIN device_credentials cr ON cr.id = e.credential_id
-	` + statBook
+	` + statBook + `
+	` + libBook
 
 // Books возвращает страницу книг пользователя от последней синхронизации к более
 // ранним и счётчики по всем его книгам. before — курсор (0 — с начала).
@@ -293,7 +313,7 @@ func (s *Store) Activity(ctx context.Context, userID int64, hash string, before 
 			SELECT document_id, min(id) AS first_id, max(id) AS last_id, count(*) AS syncs
 			FROM grp GROUP BY document_id, credential_id, g
 		)
-		SELECT d.hash, coalesce(c.meta_title, st.title), coalesce(c.meta_authors, st.authors), c.meta_filename,
+		SELECT d.hash, `+metaColumns+`,
 		       cr.name, l.device, f.percentage, l.percentage, f.server_ts, l.server_ts,
 		       groups.syncs, groups.last_id
 		FROM groups
@@ -303,6 +323,7 @@ func (s *Store) Activity(ctx context.Context, userID int64, hash string, before 
 		LEFT JOIN progress_current c ON c.user_id = ?1 AND c.document_id = groups.document_id
 		LEFT JOIN device_credentials cr ON cr.id = l.credential_id
 		`+statBook+`
+		`+libBook+`
 		WHERE groups.last_id < ?4
 		ORDER BY groups.last_id DESC
 		LIMIT ?5`, userID, docID, int64(GroupGap/time.Second), before, limit+1)
@@ -318,13 +339,13 @@ func (s *Store) Activity(ctx context.Context, userID int64, hash string, before 
 			break
 		}
 		var g Group
-		var title, authors, filename, name sql.NullString
+		var title, authors, filename, libPath, name sql.NullString
 		var from, to int64
-		if err := rows.Scan(&g.Hash, &title, &authors, &filename, &name, &g.ReportedDevice,
+		if err := rows.Scan(&g.Hash, &title, &authors, &filename, &libPath, &name, &g.ReportedDevice,
 			&g.FromPercentage, &g.ToPercentage, &from, &to, &g.Syncs, &last); err != nil {
 			return ActivityPage{}, err
 		}
-		g.Title, g.Authors, g.Filename = nullable(title), nullable(authors), nullable(filename)
+		g.Title, g.Authors, g.Filename = nullable(title), nullable(authors), fileName(filename, libPath)
 		g.DeviceName = nullable(name)
 		g.StartedAt, g.EndedAt = time.Unix(from, 0).UTC(), time.Unix(to, 0).UTC()
 		page.Items = append(page.Items, g)
@@ -336,13 +357,13 @@ type scanner interface{ Scan(dest ...any) error }
 
 func scanBook(r scanner) (Book, int64, error) {
 	var b Book
-	var title, authors, filename, name sql.NullString
+	var title, authors, filename, libPath, name sql.NullString
 	var ts, eventID int64
-	if err := r.Scan(&b.Hash, &title, &authors, &filename, &b.Percentage, &ts, &name,
+	if err := r.Scan(&b.Hash, &title, &authors, &filename, &libPath, &b.Percentage, &ts, &name,
 		&b.ReportedDevice, &eventID); err != nil {
 		return Book{}, 0, err
 	}
-	b.Title, b.Authors, b.Filename = nullable(title), nullable(authors), nullable(filename)
+	b.Title, b.Authors, b.Filename = nullable(title), nullable(authors), fileName(filename, libPath)
 	b.DeviceName = nullable(name)
 	b.Finished = b.Percentage >= FinishedAt
 	b.UpdatedAt = time.Unix(ts, 0).UTC()
@@ -354,4 +375,14 @@ func nullable(s sql.NullString) *string {
 		return nil
 	}
 	return &s.String
+}
+
+// fileName — имя файла из синхронизаций, иначе базовое имя файла библиотеки
+// (путь в индексе — относительно корня, через «/»).
+func fileName(synced, libPath sql.NullString) *string {
+	if synced.Valid || !libPath.Valid {
+		return nullable(synced)
+	}
+	base := path.Base(libPath.String)
+	return &base
 }

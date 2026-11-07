@@ -9,6 +9,7 @@
   "nav": {
     "home": "Home",
     "books": "Books",
+    "library": "Library",
     "statistics": "Statistics",
     "account": "Account",
     "devices": "Devices",
@@ -247,7 +248,7 @@
     "history": "Sync history",
     "lastSync": "{{device}} · {{when}}",
     "unknownTitle": "The title will appear once you turn on",
-    "unknownText": "KOReader will send the title, authors and file name with the next sync. The option is available in KOReader 2026.07 and later. The title and authors also come from reading statistics once you set up its sync — see the Devices screen.",
+    "unknownText": "KOReader will send the title, authors and file name with the next sync. The option is available in KOReader 2026.07 and later. The title and authors also come from reading statistics once you set up its sync — see the Devices screen — or from the book file if it is in the server library.",
     "today": "+{{value}} today",
     "stats": {
       "title": "Reading statistics",
@@ -267,6 +268,36 @@
     "yesterday": "Yesterday",
     "empty": "No syncs yet.",
     "syncs": "Syncs: {{count}}"
+  },
+  "library": {
+    "title": "Library",
+    "description": "Book files on the server. Synced books get their title, authors and file name from them.",
+    "books": "Books",
+    "files": "Files",
+    "roots": "Folders",
+    "scanning": "Scanning…",
+    "lastScan": "Last scanned {{when}}",
+    "neverScanned": "The library has not been scanned yet.",
+    "emptyUser": "Book folders are added by the server administrator on this screen.",
+    "scan": "Scan",
+    "rootsTitle": "Book folders",
+    "rootsDescription": "The server only reads these folders and never changes anything in them. New and changed files are found by a scan: after a folder is added, on schedule and with the Scan button.",
+    "noRoots": "No folders yet.",
+    "rootFiles": "Files: {{files}}",
+    "rootScanned": "scanned {{when}}",
+    "rootNotScanned": "not scanned yet",
+    "path": "Path on the server",
+    "pathHint": "Absolute path to a folder the server can read. In Docker, the path inside the container, e.g. /books for -v /srv/books:/books:ro.",
+    "name": "Name",
+    "namePlaceholder": "optional",
+    "add": "Add folder",
+    "delete": "Delete folder",
+    "cancel": "Cancel",
+    "deleteDialog": {
+      "title": "Delete folder “{{name}}”?",
+      "description": "Its files and the books left without files leave the library. Files on disk are not touched.",
+      "confirm": "Delete"
+    }
   },
   "errors": {
     "invalid_credentials": "Wrong username or password.",
@@ -298,7 +329,10 @@
     "account_disabled": "This user is disabled.",
     "password_login_disabled": "Password sign-in is disabled: sign in with the provider.",
     "last_login_method": "Set a panel password first: without the link you'd have no way to sign in.",
-    "unknown": "The request failed. Please try again."
+    "unknown": "The request failed. Please try again.",
+    "invalid_path": "Enter an absolute path to an existing folder the server can read.",
+    "root_exists": "This folder is already added.",
+    "root_overlap": "The folder is inside an added folder or contains one."
   },
   "statistics": {
     "title": "Reading statistics",
@@ -447,8 +481,8 @@
       },
       "unknownBook": {
         "title": "The book shows up as “Unknown book”",
-        "cause": "The server knows the book only by the file hash: <sendMetadata/> is off in KOReader and the statistics on the server do not have this book.",
-        "fix": "Turn on <sendMetadata/> (KOReader 2026.07 and later) — the title arrives with the next sync. Or set up <stats>statistics sync</stats>: the title and authors are taken from it. <a>Document metadata</a>."
+        "cause": "The server knows the book only by the file hash: <sendMetadata/> is off in KOReader, the statistics on the server do not have this book, and its file is not in the server library.",
+        "fix": "Turn on <sendMetadata/> (KOReader 2026.07 and later) — the title arrives with the next sync. Or set up <stats>statistics sync</stats>: the title and authors are taken from it. Or put the book file into a server <library>library</library> folder (added by the administrator) — the title is taken from the file after a scan. <a>Document metadata</a>."
       },
       "differentBooks": {
         "title": "Another reader does not pick up the position",
@@ -473,7 +507,7 @@
       "statsNoTitles": {
         "title": "Statistics arrived, but books in the panel have no titles",
         "cause": "The reader uses <matchingFilename/> in <matchingMethod/>: statistics identifies books by the file contents, while progress then comes by file name, and the books do not match.",
-        "fix": "Turn on <sendMetadata/> — titles will come with the progress — or choose <matchingBinary/>. <a>Document matching</a>."
+        "fix": "Turn on <sendMetadata/> — titles will come with the progress — or choose <matchingBinary/>. Or put these book files into the server <library>library</library>: the file name hash finds them there. <a>Document matching</a>."
       }
     }
   },

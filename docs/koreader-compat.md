@@ -115,6 +115,12 @@ normalization, so match both NFC and NFD forms of the name.
 Progress for a hash the server knows nothing about is always stored and shown as
 an "unknown book". The server never rejects a document for being unknown.
 
+Book files in the server library are indexed under every hash a reader may send:
+the partial MD5 and the filename MD5 in raw, NFC and NFD forms. A synced document
+whose hash matches a library file takes its title and authors from that file, but
+only when neither the sync `metadata` nor the user's statistics give one: KOReader
+builds `metadata` from the same document properties, and both belong to the user.
+
 ## Devices are accounts, not `device_id`
 
 The panel identifies a device by the credentials it signed in with. The `device`

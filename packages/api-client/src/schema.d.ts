@@ -547,10 +547,148 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Сводка библиотеки
+         * @description Число книг, файлов и корней и состояние скана. Доступна любому пользователю.
+         */
+        get: operations["getLibrary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/roots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Корни библиотеки
+         * @description Только администратору.
+         */
+        get: operations["listLibraryRoots"];
+        put?: never;
+        /**
+         * Добавить корень
+         * @description Только администратору. Путь приводится к канонической форме и должен быть
+         *     абсолютным путём читаемого каталога на сервере, не вложенным в другой корень и
+         *     не содержащим его. Сервер в корне ничего не пишет. Добавление запускает скан.
+         */
+        post: operations["createLibraryRoot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/roots/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryRootID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Удалить корень
+         * @description Только администратору. Убирает из индекса файлы корня и книги, у которых не
+         *     осталось файлов. Файлы на диске не трогаются.
+         */
+        delete: operations["deleteLibraryRoot"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Сканировать библиотеку
+         * @description Только администратору. Ставит скан всех корней в очередь. Если скан уже идёт,
+         *     после него выполнится ещё ровно один.
+         */
+        post: operations["scanLibrary"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        LibrarySummary: {
+            books: number;
+            files: number;
+            roots: number;
+            scan: components["schemas"]["LibraryScan"];
+        };
+        LibraryScan: {
+            /** @description Скан идёт или поставлен в очередь. */
+            running: boolean;
+            /**
+             * Format: date-time
+             * @description Начало текущего скана; `null`, если скан не идёт.
+             */
+            started_at: string | null;
+            /**
+             * Format: date-time
+             * @description Конец последнего завершённого скана корня; `null`, если сканов не было.
+             */
+            finished_at: string | null;
+        };
+        LibraryRoot: {
+            /** Format: int64 */
+            id: number;
+            name: string;
+            /**
+             * @description Абсолютный путь на сервере.
+             * @example /books
+             */
+            path: string;
+            /** @description Число проиндексированных файлов. */
+            files: number;
+            /**
+             * Format: date-time
+             * @description Конец последнего завершённого скана; `null`, если корень ещё не сканировался.
+             */
+            scanned_at: string | null;
+            /** @description Ошибка последнего скана; `null`, если он прошёл без ошибок. */
+            error: string | null;
+        };
+        LibraryRootList: {
+            items: components["schemas"]["LibraryRoot"][];
+        };
+        CreateLibraryRootRequest: {
+            /** @example /books */
+            path: string;
+            /** @description Пустое или отсутствующее — последний элемент пути. */
+            name?: string;
+        };
         Health: {
             /** @enum {string} */
             status: "ok";
@@ -684,10 +822,16 @@ export interface components {
             hash: string;
             /**
              * @description Из `metadata` синхронизаций этого пользователя, а если её не было — из его
-             *     статистики чтения по тому же хешу.
+             *     статистики чтения по тому же хешу, а затем из книги библиотеки, которой
+             *     принадлежит файл с этим хешем.
              */
             title: string | null;
+            /** @description Из тех же источников и в том же порядке, что `title`. */
             authors: string | null;
+            /**
+             * @description Из `metadata` синхронизаций, а если её не было — имя файла библиотеки с этим
+             *     хешем (без каталогов).
+             */
             filename: string | null;
             /**
              * Format: double
@@ -1065,6 +1209,7 @@ export interface components {
         };
     };
     parameters: {
+        LibraryRootID: number;
         DeviceID: number;
         /** @description Хеш документа, как его прислала читалка. */
         BookHash: string;
@@ -1934,6 +2079,175 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getLibrary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Сводка */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibrarySummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listLibraryRoots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Корни в порядке добавления */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryRootList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createLibraryRoot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateLibraryRootRequest"];
+            };
+        };
+        responses: {
+            /** @description Корень добавлен */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryRoot"];
+                };
+            };
+            /** @description `invalid_path` (в `message` — причина) или `bad_request` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` (не администратор) или `cross_origin` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `root_exists` — корень с этим путём уже есть; `root_overlap` — путь вложен в другой корень или содержит его */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteLibraryRoot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryRootID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Корень удалён */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` (не администратор) или `cross_origin` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `not_found`: корня нет */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    scanLibrary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Скан поставлен в очередь, `scan.running = true` */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibrarySummary"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` (не администратор) или `cross_origin` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             default: components["responses"]["Error"];
         };
     };

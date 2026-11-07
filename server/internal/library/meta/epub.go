@@ -1,0 +1,223 @@
+package meta
+
+import (
+	"archive/zip"
+	"bytes"
+	"encoding/xml"
+	"errors"
+	"fmt"
+	"io"
+	"path"
+	"strings"
+)
+
+// EPUB разбирает OPF, найденный через META-INF/container.xml. zip.OpenReader
+// читает только центральный каталог, поэтому из архива читаются лишь
+// container.xml и OPF.
+func EPUB(name string) (Book, error) {
+	z, err := zip.OpenReader(name)
+	if err != nil {
+		return Book{}, err
+	}
+	defer z.Close()
+
+	data, err := readEntry(&z.Reader, "META-INF/container.xml")
+	if err != nil {
+		return Book{}, err
+	}
+	var c struct {
+		Rootfiles []struct {
+			FullPath string `xml:"full-path,attr"`
+		} `xml:"rootfiles>rootfile"`
+	}
+	if err := xml.Unmarshal(data, &c); err != nil {
+		return Book{}, fmt.Errorf("container.xml: %w", err)
+	}
+	if len(c.Rootfiles) == 0 || c.Rootfiles[0].FullPath == "" {
+		return Book{}, errors.New("container.xml: no rootfile")
+	}
+	if data, err = readEntry(&z.Reader, strings.TrimPrefix(path.Clean(c.Rootfiles[0].FullPath), "/")); err != nil {
+		return Book{}, err
+	}
+	return parseOPF(data)
+}
+
+func readEntry(z *zip.Reader, name string) ([]byte, error) {
+	for _, f := range z.File {
+		if f.Name != name {
+			continue
+		}
+		if f.UncompressedSize64 > maxRead {
+			return nil, fmt.Errorf("%s: %w", name, ErrTooLarge)
+		}
+		r, err := f.Open()
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		defer r.Close()
+		b, err := readAll(r)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
+		return b, nil
+	}
+	return nil, fmt.Errorf("%s not found", name)
+}
+
+type opfCreator struct {
+	id, role, name string
+}
+
+// opfMeta — <meta> EPUB 2 (name/content) или EPUB 3 (property/refines/текст).
+type opfMeta struct {
+	name, content, property, refines, id, text string
+}
+
+// parseOPF извлекает метаданные из <metadata>. Сравниваются только локальные
+// имена: префиксы dc/opf в реальных файлах объявлены по-разному.
+func parseOPF(data []byte) (Book, error) {
+	d := xml.NewDecoder(bytes.NewReader(data))
+	d.Strict = false
+	d.Entity = xml.HTMLEntity
+
+	var (
+		b        Book
+		creators []opfCreator
+		metas    []opfMeta
+		depth    int // глубина внутри <metadata>; 0 — снаружи
+		text     []byte
+		cur      *opfCreator
+		curMeta  *opfMeta
+		seenMeta bool
+	)
+	for {
+		tok, err := d.Token()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return Book{}, fmt.Errorf("opf: %w", err)
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if depth == 0 {
+				if t.Name.Local == "metadata" {
+					depth, seenMeta = 1, true
+				}
+				continue
+			}
+			depth++
+			text = text[:0]
+			if depth != 2 {
+				continue
+			}
+			switch t.Name.Local {
+			case "creator":
+				cur = &opfCreator{id: attr(t, "id"), role: attr(t, "role")}
+			case "meta":
+				curMeta = &opfMeta{name: attr(t, "name"), content: attr(t, "content"),
+					property: attr(t, "property"), refines: attr(t, "refines"), id: attr(t, "id")}
+			}
+		case xml.CharData:
+			if depth > 0 {
+				text = append(text, t...)
+			}
+		case xml.EndElement:
+			if depth == 0 {
+				continue
+			}
+			if depth == 1 {
+				depth = 0
+				continue
+			}
+			if depth == 2 {
+				v := clean(string(text))
+				switch t.Name.Local {
+				case "title":
+					if b.Title == "" {
+						b.Title = v
+					}
+				case "language":
+					if b.Language == "" {
+						b.Language = v
+					}
+				case "creator":
+					if cur != nil {
+						cur.name = v
+						creators = append(creators, *cur)
+					}
+					cur = nil
+				case "meta":
+					if curMeta != nil {
+						curMeta.text = v
+						metas = append(metas, *curMeta)
+					}
+					curMeta = nil
+				}
+			}
+			depth--
+		}
+	}
+	if !seenMeta {
+		return Book{}, errors.New("opf: no <metadata>")
+	}
+
+	roles := map[string]string{}
+	for _, m := range metas {
+		if m.property == "role" && strings.HasPrefix(m.refines, "#") {
+			roles[m.refines[1:]] = m.text
+		}
+	}
+	for _, c := range creators {
+		role := c.role
+		if r, ok := roles[c.id]; ok && c.id != "" {
+			role = r
+		}
+		if (role == "" || role == "aut") && c.name != "" {
+			b.Authors = append(b.Authors, c.name)
+		}
+	}
+	b.Series, b.SeriesIndex = opfSeries(metas)
+	return b, nil
+}
+
+// opfSeries — серия calibre, иначе первая belongs-to-collection EPUB 3.
+func opfSeries(metas []opfMeta) (string, *float64) {
+	var series, index string
+	for _, m := range metas {
+		switch m.name {
+		case "calibre:series":
+			if series == "" {
+				series = clean(m.content)
+			}
+		case "calibre:series_index":
+			if index == "" {
+				index = m.content
+			}
+		}
+	}
+	if series != "" {
+		return series, parseIndex(index)
+	}
+	for _, m := range metas {
+		if m.property != "belongs-to-collection" || m.text == "" {
+			continue
+		}
+		for _, r := range metas {
+			if r.property == "group-position" && m.id != "" && r.refines == "#"+m.id {
+				return m.text, parseIndex(r.text)
+			}
+		}
+		return m.text, nil
+	}
+	return "", nil
+}
+
+func attr(t xml.StartElement, local string) string {
+	for _, a := range t.Attr {
+		if a.Name.Local == local {
+			return a.Value
+		}
+	}
+	return ""
+}

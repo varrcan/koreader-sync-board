@@ -800,8 +800,148 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/library:
+    get:
+      operationId: getLibrary
+      summary: Сводка библиотеки
+      description: Число книг, файлов и корней и состояние скана. Доступна любому пользователю.
+      tags: [library]
+      responses:
+        "200":
+          description: Сводка
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibrarySummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/library/roots:
+    get:
+      operationId: listLibraryRoots
+      summary: Корни библиотеки
+      description: Только администратору.
+      tags: [library]
+      responses:
+        "200":
+          description: Корни в порядке добавления
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryRootList"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createLibraryRoot
+      summary: Добавить корень
+      description: |
+        Только администратору. Путь приводится к канонической форме и должен быть
+        абсолютным путём читаемого каталога на сервере, не вложенным в другой корень и
+        не содержащим его. Сервер в корне ничего не пишет. Добавление запускает скан.
+      tags: [library]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLibraryRootRequest"
+      responses:
+        "201":
+          description: Корень добавлен
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryRoot"
+        "400":
+          description: "`invalid_path` (в `message` — причина) или `bad_request`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "`forbidden` (не администратор) или `cross_origin`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "`root_exists` — корень с этим путём уже есть; `root_overlap` — путь вложен в другой корень или содержит его"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/library/roots/{id}:
+    parameters:
+      - $ref: "#/components/parameters/LibraryRootID"
+    delete:
+      operationId: deleteLibraryRoot
+      summary: Удалить корень
+      description: |
+        Только администратору. Убирает из индекса файлы корня и книги, у которых не
+        осталось файлов. Файлы на диске не трогаются.
+      tags: [library]
+      responses:
+        "204":
+          description: Корень удалён
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "`forbidden` (не администратор) или `cross_origin`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "`not_found`: корня нет"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/library/scan:
+    post:
+      operationId: scanLibrary
+      summary: Сканировать библиотеку
+      description: |
+        Только администратору. Ставит скан всех корней в очередь. Если скан уже идёт,
+        после него выполнится ещё ровно один.
+      tags: [library]
+      responses:
+        "202":
+          description: Скан поставлен в очередь, `scan.running = true`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibrarySummary"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "`forbidden` (не администратор) или `cross_origin`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
 components:
   parameters:
+    LibraryRootID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
     DeviceID:
       name: id
       in: path
@@ -919,6 +1059,78 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
   schemas:
+    LibrarySummary:
+      type: object
+      required: [books, files, roots, scan]
+      properties:
+        books:
+          type: integer
+        files:
+          type: integer
+        roots:
+          type: integer
+        scan:
+          $ref: "#/components/schemas/LibraryScan"
+    LibraryScan:
+      type: object
+      required: [running, started_at, finished_at]
+      properties:
+        running:
+          type: boolean
+          description: Скан идёт или поставлен в очередь.
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Начало текущего скана; `null`, если скан не идёт.
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Конец последнего завершённого скана корня; `null`, если сканов не было.
+    LibraryRoot:
+      type: object
+      required: [id, name, path, files, scanned_at, error]
+      properties:
+        id:
+          type: integer
+          format: int64
+        name:
+          type: string
+        path:
+          type: string
+          description: Абсолютный путь на сервере.
+          example: /books
+        files:
+          type: integer
+          description: Число проиндексированных файлов.
+        scanned_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Конец последнего завершённого скана; `null`, если корень ещё не сканировался.
+        error:
+          type: string
+          nullable: true
+          description: Ошибка последнего скана; `null`, если он прошёл без ошибок.
+    LibraryRootList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryRoot"
+    CreateLibraryRootRequest:
+      type: object
+      required: [path]
+      properties:
+        path:
+          type: string
+          example: /books
+        name:
+          type: string
+          description: Пустое или отсутствующее — последний элемент пути.
     Health:
       type: object
       required: [status]
@@ -1122,13 +1334,18 @@ components:
           nullable: true
           description: |
             Из `metadata` синхронизаций этого пользователя, а если её не было — из его
-            статистики чтения по тому же хешу.
+            статистики чтения по тому же хешу, а затем из книги библиотеки, которой
+            принадлежит файл с этим хешем.
         authors:
           type: string
           nullable: true
+          description: Из тех же источников и в том же порядке, что `title`.
         filename:
           type: string
           nullable: true
+          description: |
+            Из `metadata` синхронизаций, а если её не было — имя файла библиотеки с этим
+            хешем (без каталогов).
         percentage:
           type: number
           format: double

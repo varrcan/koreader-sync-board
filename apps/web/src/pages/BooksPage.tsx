@@ -1,6 +1,7 @@
 import type { BookFilter } from "@ksb/api-client";
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { Link, useSearch } from "@tanstack/react-router";
+import { Library } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { BookRow } from "@/components/BookParts";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,14 @@ export function BooksPage() {
       <div className="flex max-w-3xl flex-col gap-1.5">
         <h1 className="font-serif text-[clamp(24px,4vw,30px)] leading-tight font-medium">{t("books.title")}</h1>
         <p className="text-sm text-pretty text-muted-foreground">{t("books.description")}</p>
+        {/* В шапке телефона места нет: библиотека с узкого экрана — отсюда. */}
+        <Link
+          to="/library"
+          className="flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-foreground md:hidden [&_svg]:size-4"
+        >
+          <Library />
+          {t("nav.library")}
+        </Link>
       </div>
 
       <nav className="flex max-w-3xl flex-wrap gap-1 self-start rounded-lg bg-muted p-1" aria-label={t("books.title")}>

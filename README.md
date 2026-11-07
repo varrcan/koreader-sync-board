@@ -8,10 +8,10 @@ A lightweight self-hosted server for the **standard** KOReader — no plugins on
   server has never seen is stored too.
 - **One account, many devices**: each e-reader gets its own password that can be revoked
   on its own.
+- **Reading statistics** through KOReader's built-in WebDAV cloud sync, and a **web panel**
+  with progress, activity and statistics.
+- **Library**: read-only folders of book files on the server give synced books their titles.
 - One static binary (linux/amd64, linux/arm64), SQLite, no Node at runtime.
-
-Reading statistics, the web panel and the library are in development: for now the panel
-has sign-in, the first-run setup and password change.
 
 ## Run with Docker
 
@@ -217,6 +217,45 @@ the file, merges it with its own and uploads the result. The vocabulary builder
 - Books synced without **Send document metadata** get their title and authors from the
   statistics.
 
+## Library
+
+The server can index folders with book files. A book synced without **Send document
+metadata** and without statistics then gets its title, authors and file name from its file:
+the server matches the synced document hash to the file by the same partial MD5 KOReader
+computes (*Binary* matching) or by the MD5 of the file name (*Filename* matching, the
+CrossPoint default). Titles from the sync metadata and from the user's statistics still win.
+
+An administrator adds folders on the **Library** screen of the panel. The path is an absolute
+path on the server; the server only reads it and never writes there. Mount the folder
+read-only and enter the path inside the container:
+
+```sh
+docker run -d --name ksb \
+  -v ksb-data:/data \
+  -v /srv/books:/books:ro \
+  -p 8080:8080 \
+  koreader-sync-board
+```
+
+The container user `65532` (or the service user of a standalone binary) needs read access to
+the files and directories.
+
+- **Formats**: `.epub`, `.fb2`, `.fb2.zip`, `.pdf`, `.djvu`, `.mobi`, `.azw`, `.cbz`. Titles,
+  authors, series and language are read from FB2 (`<title-info>`, including single-byte
+  encodings such as windows-1251) and EPUB (the OPF package). Other formats are matched by
+  hash and file name only. Files and folders starting with a dot and `*.sdr` folders are
+  skipped; symbolic links inside a folder are not followed.
+- **Grouping**: files with the same normalized title and authors (for example the FB2 and
+  the EPUB of one book) form one library book.
+- **Scanning** runs on start, every `KSB_LIBRARY_SCAN_INTERVAL` (6 hours by default), after a
+  folder is added and with the **Scan** button. Unchanged files (same size and modification
+  time) are not read again.
+- **Unavailable storage**: if a folder cannot be read or is suddenly empty (an unmounted NAS),
+  its index is kept and the panel shows the error. To clear the index of a folder emptied on
+  purpose, delete the folder in the panel.
+- **NFS**: mount with `soft` and a `timeo`: on a hard mount a dead server blocks the scan until
+  it comes back, and other folders are not scanned meanwhile.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -237,6 +276,7 @@ the file, merges it with its own and uploads the result. The vocabulary builder
 | `KSB_OIDC_AUTO_CREATE` | `false` | Create a panel user on the first sign-in of an unknown provider account |
 | `KSB_OIDC_ADMIN_CLAIM`, `KSB_OIDC_ADMIN_VALUE` | — | Set the admin role from this ID token claim on every OIDC sign-in. Set both or neither |
 | `KSB_PANEL_PASSWORD_LOGIN` | `true` | `false` disables the panel password for users linked to OIDC (requires OIDC) |
+| `KSB_LIBRARY_SCAN_INTERVAL` | `6h` | Library scan period as a Go duration (`30m`, `12h`), at least `1m`; `0` scans only when a folder is added and on demand |
 
 `serve` also accepts `-listen` and `-data-dir`, which override the environment.
 

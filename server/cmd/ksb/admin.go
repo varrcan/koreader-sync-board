@@ -51,9 +51,13 @@ func userCmd(ctx context.Context, cfg config.Config, args []string, out io.Write
 				return err
 			}
 			tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(tw, "USERNAME\tROLE\tCREATED\tDISABLED")
+			fmt.Fprintln(tw, "USERNAME\tROLE\tOIDC\tCREATED\tDISABLED")
 			for _, u := range users {
-				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", u.Username, u.Role, fmtTime(&u.CreatedAt), fmtTime(u.DisabledAt))
+				oidc := "-"
+				if u.OIDCLinked {
+					oidc = "linked"
+				}
+				fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", u.Username, u.Role, oidc, fmtTime(&u.CreatedAt), fmtTime(u.DisabledAt))
 			}
 			return tw.Flush()
 		})
@@ -82,6 +86,31 @@ func userCmd(ctx context.Context, cfg config.Config, args []string, out io.Write
 			fmt.Fprintf(out, "panel password for %q set, all panel sessions closed\n\n  username: %s\n  password: %s\n\n"+
 				"The password is shown only once. Change it in the panel after logging in.\n",
 				name, name, pass)
+			return nil
+		})
+	case "role":
+		if len(args) != 2 {
+			return usageError("usage: user role <name> admin|user")
+		}
+		name, role := args[0], accounts.Role(args[1])
+		return withAccounts(ctx, cfg, func(s *accounts.Service) error {
+			if err := s.SetRole(ctx, name, role); err != nil {
+				return fmt.Errorf("user %q: %w", name, err)
+			}
+			fmt.Fprintf(out, "user %q is now %s\n", name, role)
+			return nil
+		})
+	case "oidc-unlink":
+		// Без проверки способа входа: это путь администратора с доступом к серверу.
+		name, err := oneArg(flag.NewFlagSet("user oidc-unlink", flag.ContinueOnError), args, "user oidc-unlink <name>")
+		if err != nil {
+			return err
+		}
+		return withAccounts(ctx, cfg, func(s *accounts.Service) error {
+			if err := s.UnlinkIdentity(ctx, name); err != nil {
+				return fmt.Errorf("user %q: %w", name, err)
+			}
+			fmt.Fprintf(out, "OIDC unlinked from user %q\n", name)
 			return nil
 		})
 	case "delete":

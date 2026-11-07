@@ -50,6 +50,7 @@ type env struct {
 	setup *panelauth.Setup
 	stats *statistics.Store
 	logs  *lockedBuffer
+	srv   *Server
 }
 
 func newEnv(t *testing.T, statsOpts ...statistics.Option) *env {
@@ -66,10 +67,11 @@ func newEnv(t *testing.T, statsOpts ...statistics.Option) *env {
 	acc := accounts.New(db, accounts.WithArgon2Params(accounts.TestArgon2Params), accounts.WithLimiter(lim))
 	setup := panelauth.NewSetup(acc, lim)
 	stats := statistics.New(db, t.TempDir(), log, statsOpts...)
-	srv := httptest.NewServer(NewHandler(&Server{Accounts: acc, Auth: panelauth.New(acc, nil, log), Setup: setup,
-		Progress: progress.New(db), Statistics: stats, Log: log}))
+	api := &Server{Accounts: acc, Auth: panelauth.New(acc, nil, log), Setup: setup,
+		Progress: progress.New(db), Statistics: stats, Log: log}
+	srv := httptest.NewServer(NewHandler(api))
 	t.Cleanup(srv.Close)
-	return &env{t: t, ctx: ctx, url: srv.URL, db: db, acc: acc, setup: setup, stats: stats, logs: logs}
+	return &env{t: t, ctx: ctx, url: srv.URL, db: db, acc: acc, setup: setup, stats: stats, logs: logs, srv: api}
 }
 
 // browser — клиент со своим cookie jar.

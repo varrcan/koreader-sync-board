@@ -55,6 +55,8 @@ export interface paths {
          * @description Проверяет пароль панели и открывает сессию. Неизвестное имя, неверный пароль,
          *     отключённый пользователь и пользователь без пароля панели дают одинаковый
          *     ответ. Неудачи расходуют бюджет ограничителя по адресу, общий с kosync.
+         *     Если вход по паролю выключен, верный пароль пользователя с привязанным OIDC
+         *     даёт 403 `password_login_disabled` без сессии.
          */
         post: operations["login"];
         delete?: never;
@@ -77,6 +79,76 @@ export interface paths {
          * @description Удаляет текущую сессию и стирает cookie. Без сессии ничего не делает.
          */
         post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/methods": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Способы входа
+         * @description Что показать на экране входа. Доступен без сессии.
+         */
+        get: operations["getAuthMethods"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oidc/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Начать вход через OIDC
+         * @description Навигация браузера, не XHR. Отвечает 302 на провайдера и ставит cookie потока
+         *     `ksb_oidc`. Запрос не на хост `KSB_PUBLIC_URL` сначала перенаправляется туда же
+         *     на публичный адрес, без cookie. Ошибка discovery — 302 на
+         *     `/login?oidc_error=oidc_unavailable`.
+         */
+        get: operations["oidcLogin"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/oidc/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Возврат с OIDC-провайдера
+         * @description Адрес возврата, зарегистрированный у провайдера: `KSB_PUBLIC_URL` +
+         *     `/api/v1/auth/oidc/callback`. Всегда стирает `ksb_oidc` и отвечает 302: при
+         *     входе — на сохранённый `redirect` с cookie сессии, при привязке — на
+         *     `/account?oidc=linked`; ошибки — на `/login?oidc_error=<код>` или
+         *     `/account?oidc_error=<код>`. Коды: `oidc_denied`, `oidc_failed`,
+         *     `oidc_unavailable`, `setup_required`, `oidc_not_linked`, `account_disabled`,
+         *     `oidc_invalid_username`, `oidc_username_taken`, `oidc_already_linked`,
+         *     `oidc_session_expired`. Параметры необязательны: их отсутствие — ошибка потока.
+         */
+        get: operations["oidcCallback"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -112,10 +184,35 @@ export interface paths {
          * Смена своего пароля панели
          * @description Меняет пароль при верном текущем и удаляет все остальные сессии пользователя;
          *     текущая остаётся. Неверный текущий пароль расходует бюджет ограничителя.
+         *     Пользователю без пароля панели первый пароль задаётся без `current_password`,
+         *     сессии не трогаются. Если вход по паролю выключен, а пользователь привязан к
+         *     OIDC — 403 `password_login_disabled`.
          */
         put: operations["changePassword"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/oidc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Начать привязку OIDC
+         * @description Ставит cookie потока `ksb_oidc` с признаком привязки и возвращает адрес
+         *     провайдера; клиент переходит на него. Повторная привязка заменяет прежнюю.
+         */
+        post: operations["startOIDCLink"];
+        /** Отвязать OIDC */
+        delete: operations["unlinkOIDC"];
         options?: never;
         head?: never;
         patch?: never;
@@ -478,6 +575,36 @@ export interface components {
         Me: {
             username: string;
             role: components["schemas"]["Role"];
+            /** @description Задан ли пароль панели. */
+            has_password: boolean;
+            /** @description Привязана ли учётка OIDC-провайдера. */
+            oidc_linked: boolean;
+        };
+        AuthMethods: {
+            /**
+             * @description `on` — вход по паролю для всех; `unlinked` — только для пользователей без
+             *     привязки OIDC.
+             * @enum {string}
+             */
+            password: "on" | "unlinked";
+            oidc?: components["schemas"]["OIDCMethod"];
+        };
+        /** @description Есть, только если OIDC настроен. */
+        OIDCMethod: {
+            /**
+             * @description Подпись кнопки входа.
+             * @example Zitadel
+             */
+            name: string;
+            /**
+             * @description Публичный адрес панели (`KSB_PUBLIC_URL`); привязка работает только с него.
+             * @example https://books.example.com
+             */
+            origin: string;
+        };
+        OIDCLinkStart: {
+            /** @description Адрес авторизации у провайдера. */
+            authorize_url: string;
         };
         LoginRequest: {
             username: string;
@@ -485,8 +612,11 @@ export interface components {
             password: string;
         };
         ChangePasswordRequest: {
-            /** Format: password */
-            current_password: string;
+            /**
+             * Format: password
+             * @description Не нужен пользователю без пароля панели (первый пароль).
+             */
+            current_password?: string;
             /** Format: password */
             new_password: string;
         };
@@ -833,6 +963,23 @@ export interface components {
         };
     };
     responses: {
+        /** @description Перенаправление браузера */
+        Redirect: {
+            headers: {
+                Location?: string;
+                [name: string]: unknown;
+            };
+            content?: never;
+        };
+        /** @description `not_found`: OIDC не настроен */
+        OIDCNotConfigured: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description `not_found`: устройства нет или оно недоступно владельцу сессии */
         NotFound: {
             headers: {
@@ -1012,7 +1159,15 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
-            403: components["responses"]["CrossOrigin"];
+            /** @description `password_login_disabled` или `cross_origin` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             429: components["responses"]["TooManyAttempts"];
             default: components["responses"]["Error"];
         };
@@ -1034,6 +1189,63 @@ export interface operations {
                 content?: never;
             };
             403: components["responses"]["CrossOrigin"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getAuthMethods: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Доступные способы входа */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthMethods"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    oidcLogin: {
+        parameters: {
+            query?: {
+                /** @description Путь внутри панели, куда вернуться после входа; иной заменяется на `/`. */
+                redirect?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            302: components["responses"]["Redirect"];
+            404: components["responses"]["OIDCNotConfigured"];
+            default: components["responses"]["Error"];
+        };
+    };
+    oidcCallback: {
+        parameters: {
+            query?: {
+                code?: string;
+                state?: string;
+                error?: string;
+                error_description?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            302: components["responses"]["Redirect"];
+            404: components["responses"]["OIDCNotConfigured"];
             default: components["responses"]["Error"];
         };
     };
@@ -1089,7 +1301,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `invalid_credentials` (неверный текущий пароль) или `cross_origin` */
+            /** @description `invalid_credentials` (неверный текущий пароль), `password_login_disabled` или `cross_origin` */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -1099,6 +1311,79 @@ export interface operations {
                 };
             };
             429: components["responses"]["TooManyAttempts"];
+            default: components["responses"]["Error"];
+        };
+    };
+    startOIDCLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Адрес авторизации у провайдера */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OIDCLinkStart"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["CrossOrigin"];
+            404: components["responses"]["OIDCNotConfigured"];
+            /** @description `oidc_wrong_host`: панель открыта не по `KSB_PUBLIC_URL` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `oidc_unavailable`: провайдер недоступен */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    unlinkOIDC: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Привязки нет */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["CrossOrigin"];
+            404: components["responses"]["OIDCNotConfigured"];
+            /** @description `last_login_method`: у пользователя нет пароля панели */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             default: components["responses"]["Error"];
         };
     };

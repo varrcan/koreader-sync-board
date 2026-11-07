@@ -1,4 +1,4 @@
-import type { Me, SetupStatus } from "@ksb/api-client";
+import type { AuthMethods, Me, SetupStatus } from "@ksb/api-client";
 import { QueryClient, queryOptions } from "@tanstack/react-query";
 import type { useTranslation } from "react-i18next";
 import { api, ApiFailure, failure } from "./api";
@@ -23,6 +23,17 @@ export const setupQuery = queryOptions({
   staleTime: Infinity,
   queryFn: async (): Promise<SetupStatus> => {
     const { data, error, response } = await api.GET("/api/v1/setup");
+    if (error) throw failure(error, response);
+    return data;
+  },
+});
+
+// Способы входа задаются конфигурацией сервера и до перезапуска не меняются.
+export const methodsQuery = queryOptions({
+  queryKey: ["auth-methods"],
+  staleTime: Infinity,
+  queryFn: async (): Promise<AuthMethods> => {
+    const { data, error, response } = await api.GET("/api/v1/auth/methods");
     if (error) throw failure(error, response);
     return data;
   },
@@ -69,6 +80,19 @@ export function errorText(t: TFunction, err: unknown): string {
     case "invalid_statistics":
     case "file_too_large":
     case "conflict":
+    case "oidc_denied":
+    case "oidc_failed":
+    case "oidc_unavailable":
+    case "oidc_not_linked":
+    case "oidc_invalid_username":
+    case "oidc_username_taken":
+    case "oidc_already_linked":
+    case "oidc_session_expired":
+    case "oidc_wrong_host":
+    case "setup_required":
+    case "account_disabled":
+    case "password_login_disabled":
+    case "last_login_method":
       return t(`errors.${code}`);
     case "too_many_attempts": {
       const seconds = err instanceof ApiFailure ? (err.retryAfter ?? 900) : 900;

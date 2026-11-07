@@ -51,6 +51,8 @@ var (
 	ErrInvalidPassword = fmt.Errorf("%w: password must be %d to %d characters", ErrInvalid, MinPanelPassword, MaxPanelPassword)
 	// ErrSetupCompleted — первый администратор уже есть.
 	ErrSetupCompleted = errors.New("setup already completed")
+	// ErrIdentityTaken — пара (issuer, sub) уже привязана к пользователю.
+	ErrIdentityTaken = errors.New("identity already linked to a user")
 	// ErrRepeated сопровождает ErrUnauthorized или ErrUnknownUser, когда тот же
 	// ключ уже был отвергнут недавно. Такие отказы не стоит логировать: их шлёт
 	// отозванная читалка, и fail2ban по логу забанил бы её домашнюю сеть.
@@ -95,6 +97,28 @@ type User struct {
 	Role       Role
 	CreatedAt  time.Time
 	DisabledAt *time.Time
+	// HasPassword — задан пароль панели; OIDCLinked — привязана учётка OIDC.
+	HasPassword bool
+	OIDCLinked  bool
+}
+
+// userColumns — колонки для scanUser; таблица users должна называться u.
+const userColumns = `u.id, u.username, u.role, u.created_at, u.disabled_at,
+	u.panel_password_hash IS NOT NULL, u.oidc_subject IS NOT NULL`
+
+type scanner interface{ Scan(dest ...any) error }
+
+func scanUser(row scanner, extra ...any) (User, error) {
+	var u User
+	var created int64
+	var disabled sql.NullInt64
+	dest := append([]any{&u.ID, &u.Username, &u.Role, &created, &disabled, &u.HasPassword, &u.OIDCLinked}, extra...)
+	if err := row.Scan(dest...); err != nil {
+		return User{}, err
+	}
+	u.CreatedAt = time.Unix(created, 0)
+	u.DisabledAt = optTime(disabled)
+	return u, nil
 }
 
 // Device — учётные данные устройства без ключа.
@@ -212,13 +236,20 @@ func (s *Service) verify(secret, encoded string) bool {
 	return err == nil && ok
 }
 
+func checkRole(role Role) error {
+	if role != RoleAdmin && role != RoleUser {
+		return fmt.Errorf("%w: role must be admin or user", ErrInvalid)
+	}
+	return nil
+}
+
 // CreateUser создаёт пользователя без устройств.
 func (s *Service) CreateUser(ctx context.Context, username string, role Role) (User, error) {
 	if !ValidUsername(username) {
 		return User{}, ErrInvalidUsername
 	}
-	if role != RoleAdmin && role != RoleUser {
-		return User{}, fmt.Errorf("%w: role must be admin or user", ErrInvalid)
+	if err := checkRole(role); err != nil {
+		return User{}, err
 	}
 	now := s.now().Unix()
 	res, err := s.db.Write.ExecContext(ctx,
@@ -281,21 +312,17 @@ func (s *Service) CreateUserWithDevice(ctx context.Context, username, deviceName
 // ListUsers возвращает пользователей по имени.
 func (s *Service) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := s.db.Read.QueryContext(ctx,
-		`SELECT id, username, role, created_at, disabled_at FROM users ORDER BY username`)
+		`SELECT `+userColumns+` FROM users u ORDER BY u.username`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []User
 	for rows.Next() {
-		var u User
-		var created int64
-		var disabled sql.NullInt64
-		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &created, &disabled); err != nil {
+		u, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		u.CreatedAt = time.Unix(created, 0)
-		u.DisabledAt = optTime(disabled)
 		out = append(out, u)
 	}
 	return out, rows.Err()

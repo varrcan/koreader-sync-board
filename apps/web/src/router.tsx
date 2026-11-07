@@ -2,12 +2,12 @@
 import { createRootRoute, createRoute, createRouter, Outlet, redirect } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { meQuery, queryClient, safeRedirect, setupQuery } from "./auth";
+import { meQuery, methodsQuery, queryClient, safeRedirect, setupQuery } from "./auth";
 import type { BookFilter, StatisticsPeriod } from "@ksb/api-client";
 import { AppLayout } from "./components/AppLayout";
 import { BookPage } from "./pages/BookPage";
 import { BooksPage } from "./pages/BooksPage";
-import { ChangePasswordPage } from "./pages/ChangePasswordPage";
+import { AccountPage } from "./pages/AccountPage";
 import { DevicesPage } from "./pages/DevicesPage";
 import { HelpIndexPage } from "./pages/help/HelpIndexPage";
 import { HelpProgressPage } from "./pages/help/HelpProgressPage";
@@ -42,12 +42,16 @@ const setupRoute = createRoute({
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
-  validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
-    typeof search.redirect === "string" ? { redirect: search.redirect } : {},
+  // oidc_error — код неудачного OIDC-входа: сервер возвращает браузер сюда.
+  validateSearch: (search: Record<string, unknown>): { redirect?: string; oidc_error?: string } => ({
+    ...(typeof search.redirect === "string" ? { redirect: search.redirect } : {}),
+    ...(typeof search.oidc_error === "string" ? { oidc_error: search.oidc_error } : {}),
+  }),
   beforeLoad: async ({ search }) => {
     const setup = await queryClient.ensureQueryData(setupQuery);
     if (setup.required) throw redirect({ to: "/setup" });
     if (await queryClient.ensureQueryData(meQuery)) throw redirect({ href: safeRedirect(search.redirect) });
+    await queryClient.ensureQueryData(methodsQuery);
   },
   component: LoginPage,
 });
@@ -112,10 +116,27 @@ const devicesRoute = createRoute({
   component: DevicesPage,
 });
 
+// Результат привязки OIDC: сервер возвращает браузер сюда с oidc=linked или oidc_error.
+const accountRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/account",
+  validateSearch: (search: Record<string, unknown>): { oidc?: "linked"; oidc_error?: string } => ({
+    ...(search.oidc === "linked" ? { oidc: "linked" as const } : {}),
+    ...(typeof search.oidc_error === "string" ? { oidc_error: search.oidc_error } : {}),
+  }),
+  beforeLoad: async () => {
+    await queryClient.ensureQueryData(methodsQuery);
+  },
+  component: AccountPage,
+});
+
+// Старый адрес «Сменить пароль».
 const passwordRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/password",
-  component: ChangePasswordPage,
+  beforeLoad: () => {
+    throw redirect({ to: "/account", replace: true });
+  },
 });
 
 const helpRoute = createRoute({
@@ -151,6 +172,7 @@ const routeTree = rootRoute.addChildren([
     bookRoute,
     statisticsRoute,
     devicesRoute,
+    accountRoute,
     passwordRoute,
     helpRoute,
     helpProgressRoute,

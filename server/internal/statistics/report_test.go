@@ -837,6 +837,7 @@ func TestOracleBooks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer rows.Close()
 	var ids []int64
 	var md5s []string
 	for rows.Next() {
@@ -847,6 +848,10 @@ func TestOracleBooks(t *testing.T) {
 		}
 		ids, md5s = append(ids, id), append(md5s, md5)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	// Закрыть до следующих запросов, не дожидаясь defer.
 	rows.Close()
 	for i, id := range ids {
 		b := koBook{md5: md5s[i]}

@@ -114,6 +114,10 @@ func startServer(t *testing.T) (string, *syncBuffer) {
 	l.Close()
 	t.Setenv("KSB_LISTEN", addr)
 	t.Setenv("KSB_TRUSTED_PROXIES", "127.0.0.1")
+	// Адрес сервера случайный, а публичный адрес OIDC должен с ним совпадать.
+	if os.Getenv("KSB_OIDC_ISSUER") != "" {
+		t.Setenv("KSB_PUBLIC_URL", "http://"+addr)
+	}
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {
 		t.Fatal(err)

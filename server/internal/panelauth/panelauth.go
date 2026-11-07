@@ -33,6 +33,10 @@ var publicPatterns = map[string]bool{
 	"POST /api/v1/auth/logout": true,
 	"GET /api/v1/setup":        true,
 	"POST /api/v1/setup":       true,
+
+	"GET /api/v1/auth/methods":       true,
+	"GET /api/v1/auth/oidc/login":    true,
+	"GET /api/v1/auth/oidc/callback": true,
 }
 
 // Auth проверяет сессии панели.
@@ -126,7 +130,7 @@ func SetCookie(w http.ResponseWriter, r *http.Request, token string) {
 		Path:     "/",
 		MaxAge:   int(accounts.SessionTTL / time.Second),
 		HttpOnly: true,
-		Secure:   isHTTPS(r),
+		Secure:   IsHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -138,12 +142,13 @@ func ClearCookie(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   isHTTPS(r),
+		Secure:   IsHTTPS(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
 
-func isHTTPS(r *http.Request) bool {
+// IsHTTPS — запрос пришёл по HTTPS (напрямую или через прокси).
+func IsHTTPS(r *http.Request) bool {
 	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 

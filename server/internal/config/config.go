@@ -2,9 +2,13 @@
 package config
 
 import (
+	"cmp"
 	"fmt"
 	"net/netip"
+	"net/url"
+	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/clientip"
 )
@@ -25,6 +29,35 @@ type Config struct {
 	// AdminUser и AdminPassword создают администратора при пустой базе.
 	AdminUser     string // ADMIN_USER
 	AdminPassword string // ADMIN_PASSWORD
+
+	// OIDC — вход в панель через OIDC-провайдера; nil, если не настроен.
+	OIDC *OIDC
+	// PanelPasswordLogin — вход по паролю панели для пользователей с привязанным
+	// OIDC (KSB_PANEL_PASSWORD_LOGIN, по умолчанию true). Непривязанные входят
+	// паролем всегда.
+	PanelPasswordLogin bool
+}
+
+// OIDC — настройки OIDC-провайдера панели.
+type OIDC struct {
+	Issuer       string // KSB_OIDC_ISSUER
+	ClientID     string // KSB_OIDC_CLIENT_ID
+	ClientSecret string // KSB_OIDC_CLIENT_SECRET; пусто — публичный клиент только с PKCE
+	Name         string // KSB_OIDC_NAME — подпись кнопки входа
+	// Scopes всегда содержит openid (KSB_OIDC_SCOPES, через пробел).
+	Scopes        []string
+	UsernameClaim string // KSB_OIDC_USERNAME_CLAIM
+	AutoCreate    bool   // KSB_OIDC_AUTO_CREATE
+	// AdminClaim и AdminValue задаются только вместе; пустые — роль по claim не синхронизируется.
+	AdminClaim string // KSB_OIDC_ADMIN_CLAIM
+	AdminValue string // KSB_OIDC_ADMIN_VALUE
+	// PublicURL — origin панели из KSB_PUBLIC_URL без завершающего «/».
+	PublicURL string
+}
+
+// RedirectURL — адрес возврата с провайдера, зарегистрированный в IdP.
+func (o *OIDC) RedirectURL() string {
+	return o.PublicURL + "/api/v1/auth/oidc/callback"
 }
 
 // Defaults возвращает значения по умолчанию.
@@ -32,6 +65,8 @@ func Defaults() Config {
 	return Config{
 		Listen:  ":8080",
 		DataDir: "/data",
+
+		PanelPasswordLogin: true,
 	}
 }
 
@@ -64,7 +99,97 @@ func Load(getenv func(string) string) (Config, error) {
 	case c.AdminUser == "" && c.AdminPassword != "":
 		return Config{}, fmt.Errorf("ADMIN_PASSWORD is set but ADMIN_USER is not: set both or neither")
 	}
+	if c.OIDC, err = loadOIDC(getenv); err != nil {
+		return Config{}, err
+	}
+	if v := getenv("KSB_PANEL_PASSWORD_LOGIN"); v != "" {
+		if c.PanelPasswordLogin, err = strconv.ParseBool(v); err != nil {
+			return Config{}, fmt.Errorf("KSB_PANEL_PASSWORD_LOGIN: invalid boolean %q", v)
+		}
+	}
+	// Без OIDC выключенный вход по паролю запер бы панель целиком.
+	if !c.PanelPasswordLogin && c.OIDC == nil {
+		return Config{}, fmt.Errorf("KSB_PANEL_PASSWORD_LOGIN=false requires OIDC: set KSB_OIDC_ISSUER, KSB_OIDC_CLIENT_ID and KSB_PUBLIC_URL")
+	}
 	return c, nil
+}
+
+// loadOIDC читает KSB_OIDC_* и KSB_PUBLIC_URL; без всех трёх обязательных — nil.
+func loadOIDC(getenv func(string) string) (*OIDC, error) {
+	o := &OIDC{
+		Issuer:        getenv("KSB_OIDC_ISSUER"),
+		ClientID:      getenv("KSB_OIDC_CLIENT_ID"),
+		ClientSecret:  getenv("KSB_OIDC_CLIENT_SECRET"),
+		Name:          cmp.Or(getenv("KSB_OIDC_NAME"), "SSO"),
+		UsernameClaim: cmp.Or(getenv("KSB_OIDC_USERNAME_CLAIM"), "preferred_username"),
+		AdminClaim:    getenv("KSB_OIDC_ADMIN_CLAIM"),
+		AdminValue:    getenv("KSB_OIDC_ADMIN_VALUE"),
+	}
+	switch {
+	case o.AdminClaim != "" && o.AdminValue == "":
+		return nil, fmt.Errorf("KSB_OIDC_ADMIN_CLAIM is set but KSB_OIDC_ADMIN_VALUE is not: set both or neither")
+	case o.AdminClaim == "" && o.AdminValue != "":
+		return nil, fmt.Errorf("KSB_OIDC_ADMIN_VALUE is set but KSB_OIDC_ADMIN_CLAIM is not: set both or neither")
+	}
+	publicURL := getenv("KSB_PUBLIC_URL")
+	required := []struct{ name, value string }{
+		{"KSB_OIDC_ISSUER", o.Issuer}, {"KSB_OIDC_CLIENT_ID", o.ClientID}, {"KSB_PUBLIC_URL", publicURL},
+	}
+	var missing []string
+	for _, r := range required {
+		if r.value == "" {
+			missing = append(missing, r.name)
+		}
+	}
+	switch len(missing) {
+	case len(required):
+		return nil, nil
+	case 0:
+	default:
+		return nil, fmt.Errorf("OIDC requires KSB_OIDC_ISSUER, KSB_OIDC_CLIENT_ID and KSB_PUBLIC_URL: %s is not set",
+			strings.Join(missing, ", "))
+	}
+	var err error
+	if o.PublicURL, err = parseOrigin(publicURL); err != nil {
+		return nil, fmt.Errorf("KSB_PUBLIC_URL: %w", err)
+	}
+	if o.AutoCreate, err = parseBool(getenv, "KSB_OIDC_AUTO_CREATE"); err != nil {
+		return nil, err
+	}
+	o.Scopes = strings.Fields(cmp.Or(getenv("KSB_OIDC_SCOPES"), "openid profile email"))
+	if !slices.Contains(o.Scopes, "openid") {
+		o.Scopes = append([]string{"openid"}, o.Scopes...)
+	}
+	return o, nil
+}
+
+// parseOrigin проверяет, что v — абсолютный http(s) URL без пути, query и
+// фрагмента, и возвращает его без завершающего «/». Путь запрещён: панель за
+// префиксом не поддерживается — cookie потока и редиректы идут от корня.
+func parseOrigin(v string) (string, error) {
+	u, err := url.Parse(v)
+	switch {
+	case err != nil:
+		return "", fmt.Errorf("invalid URL %q", v)
+	case (u.Scheme != "http" && u.Scheme != "https") || u.Host == "":
+		return "", fmt.Errorf("%q must be an absolute http or https URL", v)
+	case u.Path != "" && u.Path != "/":
+		return "", fmt.Errorf("%q must not have a path: serving the panel under a prefix is not supported", v)
+	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(v, "#") || u.User != nil:
+		return "", fmt.Errorf("%q must be an origin without query, fragment or credentials", v)
+	}
+	// Origin в том виде, в каком его отдаёт браузер (window.location.origin) и
+	// присылает в Host: хост в нижнем регистре, порт по умолчанию опущен. Иначе
+	// «https://host:443» никогда не совпал бы с Host, и вход по OIDC зациклился
+	// бы на перенаправлении на публичный адрес.
+	host := strings.ToLower(u.Host)
+	if p := u.Port(); (u.Scheme == "http" && p == "80") || (u.Scheme == "https" && p == "443") {
+		host = strings.ToLower(u.Hostname())
+		if strings.Contains(host, ":") {
+			host = "[" + host + "]"
+		}
+	}
+	return u.Scheme + "://" + host, nil
 }
 
 func parseBool(getenv func(string) string, name string) (bool, error) {

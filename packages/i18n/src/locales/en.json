@@ -10,7 +10,7 @@
     "home": "Home",
     "books": "Books",
     "statistics": "Statistics",
-    "password": "Change password",
+    "account": "Account",
     "devices": "Devices",
     "help": "Help"
   },
@@ -26,7 +26,10 @@
   "login": {
     "title": "Sign in to the panel",
     "description": "Your panel password, not a device password.",
-    "submit": "Sign in"
+    "submit": "Sign in",
+    "oidc": "Sign in with {{name}}",
+    "usePassword": "Sign in with password",
+    "or": "or"
   },
   "setup": {
     "title": "First run",
@@ -47,7 +50,28 @@
     "current": "Current password",
     "new": "New password",
     "submit": "Change password",
-    "changed": "Password changed."
+    "changed": "Password changed.",
+    "setTitle": "Panel password",
+    "setDescription": "No password yet. With one you can sign in without the provider.",
+    "setSubmit": "Set password",
+    "set": "Password set."
+  },
+  "account": {
+    "title": "Account",
+    "description": "Panel password and sign-in with the provider."
+  },
+  "oidc": {
+    "title": "Sign in with {{name}}",
+    "linked": "Your {{name}} account is linked: you can use it to sign in to the panel.",
+    "notLinked": "Not linked. Link your {{name}} account to sign in with it.",
+    "link": "Link",
+    "relink": "Link again",
+    "unlink": "Unlink",
+    "linkedDone": "Account linked.",
+    "unlinkedDone": "Link removed.",
+    "needPassword": "Set a panel password before unlinking, otherwise you won't be able to sign in.",
+    "wrongHost": "Linking only works at the panel's public address.",
+    "openPublic": "Open {{origin}}"
   },
   "copy": {
     "copy": "Copy",
@@ -154,7 +178,7 @@
       "step3": "Sync:",
       "step3Hint": "The vocabulary builder syncs the same way from its own settings."
     },
-    "changePassword": "Change panel password"
+    "changePassword": "Panel password and sign-in"
   },
   "common": {
     "loading": "Loading…",
@@ -261,6 +285,19 @@
     "invalid_statistics": "This is not a KOReader statistics file (statistics.sqlite3), or it is damaged.",
     "file_too_large": "The file is larger than 64 MiB.",
     "conflict": "Statistics changed during the upload because a reader synced. Please try again.",
+    "oidc_denied": "Sign-in with the provider was cancelled.",
+    "oidc_failed": "Couldn't sign in with the provider. Please try again.",
+    "oidc_unavailable": "The sign-in provider is unavailable. Try later or use your password.",
+    "oidc_not_linked": "This provider account isn't linked to a panel user. Sign in with your password and link it under Account.",
+    "oidc_invalid_username": "The provider didn't send a usable username: it is empty or contains ':'.",
+    "oidc_username_taken": "A user with this name already exists. Sign in with your password and link the provider account under Account.",
+    "oidc_already_linked": "This provider account is already linked to another user.",
+    "oidc_session_expired": "Your session ended while linking. Sign in and link again.",
+    "oidc_wrong_host": "Linking only works at the panel's public address.",
+    "setup_required": "The panel isn't set up yet: create the administrator first.",
+    "account_disabled": "This user is disabled.",
+    "password_login_disabled": "Password sign-in is disabled: sign in with the provider.",
+    "last_login_method": "Set a panel password first: without the link you'd have no way to sign in.",
     "unknown": "The request failed. Please try again."
   },
   "statistics": {

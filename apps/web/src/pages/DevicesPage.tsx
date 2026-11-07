@@ -129,7 +129,7 @@ export function DevicesPage() {
           <h1 className="font-serif text-[clamp(24px,4vw,30px)] leading-tight font-medium">{t("devices.title")}</h1>
           <p className="text-sm text-pretty text-muted-foreground">{t("devices.description")}</p>
           <Link
-            to="/password"
+            to="/account"
             className="flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-foreground [&_svg]:size-4"
           >
             <KeyRound />

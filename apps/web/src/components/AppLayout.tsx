@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useRouter } from "@tanstack/react-router";
-import { BookOpen, ChartNoAxesColumn, CircleHelp, House, KeyRound, LogOut, TabletSmartphone } from "lucide-react";
+import { BookOpen, ChartNoAxesColumn, CircleHelp, House, LogOut, TabletSmartphone, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "@/api";
@@ -14,7 +14,7 @@ function NavLink({
   icon,
   children,
 }: {
-  to: "/" | "/books" | "/statistics" | "/devices" | "/password" | "/help";
+  to: "/" | "/books" | "/statistics" | "/devices" | "/account" | "/help";
   icon: ReactNode;
   children: ReactNode;
 }) {
@@ -92,8 +92,8 @@ export function AppLayout() {
           <NavLink to="/devices" icon={<TabletSmartphone />}>
             {t("nav.devices")}
           </NavLink>
-          <NavLink to="/password" icon={<KeyRound />}>
-            {t("nav.password")}
+          <NavLink to="/account" icon={<UserRound />}>
+            {t("nav.account")}
           </NavLink>
           <NavLink to="/help" icon={<CircleHelp />}>
             {t("nav.help")}
@@ -124,7 +124,7 @@ export function AppLayout() {
                 <BookOpen />
               </Link>
             </Button>
-            {/* Смена пароля с телефона — ссылкой на экране «Устройства». */}
+            {/* «Учётная запись» с телефона — ссылкой на экране «Устройства». */}
             <Button variant="ghost" size="icon-sm" asChild title={t("nav.statistics")} aria-label={t("nav.statistics")}>
               <Link
                 to="/statistics"

@@ -8,8 +8,9 @@ info:
     обслуживается в корне URL и здесь не описан.
 
     Авторизация — cookie сессии `ksb_session` (`HttpOnly`, `SameSite=Lax`), которую
-    ставят вход и мастер настройки. Без сессии доступны только health, version,
-    вход, выход и мастер; остальные операции отвечают 401 `unauthorized`.
+    ставят вход (паролем или через OIDC) и мастер настройки. Без сессии доступны только
+    health, version, способы входа, вход, выход и мастер; остальные операции отвечают
+    401 `unauthorized`.
     Изменяющие запросы из браузера с чужого origin отклоняются с 403 `cross_origin`.
   license:
     name: AGPL-3.0-only
@@ -52,6 +53,8 @@ paths:
         Проверяет пароль панели и открывает сессию. Неизвестное имя, неверный пароль,
         отключённый пользователь и пользователь без пароля панели дают одинаковый
         ответ. Неудачи расходуют бюджет ограничителя по адресу, общий с kosync.
+        Если вход по паролю выключен, верный пароль пользователя с привязанным OIDC
+        даёт 403 `password_login_disabled` без сессии.
       tags: [auth]
       requestBody:
         required: true
@@ -78,7 +81,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "403":
-          $ref: "#/components/responses/CrossOrigin"
+          description: "`password_login_disabled` или `cross_origin`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/TooManyAttempts"
         default:
@@ -94,6 +101,87 @@ paths:
           description: Сессии больше нет
         "403":
           $ref: "#/components/responses/CrossOrigin"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/methods:
+    get:
+      operationId: getAuthMethods
+      summary: Способы входа
+      description: Что показать на экране входа. Доступен без сессии.
+      tags: [auth]
+      responses:
+        "200":
+          description: Доступные способы входа
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthMethods"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/oidc/login:
+    get:
+      operationId: oidcLogin
+      summary: Начать вход через OIDC
+      description: |
+        Навигация браузера, не XHR. Отвечает 302 на провайдера и ставит cookie потока
+        `ksb_oidc`. Запрос не на хост `KSB_PUBLIC_URL` сначала перенаправляется туда же
+        на публичный адрес, без cookie. Ошибка discovery — 302 на
+        `/login?oidc_error=oidc_unavailable`.
+      tags: [auth]
+      parameters:
+        - name: redirect
+          in: query
+          required: false
+          description: Путь внутри панели, куда вернуться после входа; иной заменяется на `/`.
+          schema:
+            type: string
+      responses:
+        "302":
+          $ref: "#/components/responses/Redirect"
+        "404":
+          $ref: "#/components/responses/OIDCNotConfigured"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/auth/oidc/callback:
+    get:
+      operationId: oidcCallback
+      summary: Возврат с OIDC-провайдера
+      description: |
+        Адрес возврата, зарегистрированный у провайдера: `KSB_PUBLIC_URL` +
+        `/api/v1/auth/oidc/callback`. Всегда стирает `ksb_oidc` и отвечает 302: при
+        входе — на сохранённый `redirect` с cookie сессии, при привязке — на
+        `/account?oidc=linked`; ошибки — на `/login?oidc_error=<код>` или
+        `/account?oidc_error=<код>`. Коды: `oidc_denied`, `oidc_failed`,
+        `oidc_unavailable`, `setup_required`, `oidc_not_linked`, `account_disabled`,
+        `oidc_invalid_username`, `oidc_username_taken`, `oidc_already_linked`,
+        `oidc_session_expired`. Параметры необязательны: их отсутствие — ошибка потока.
+      tags: [auth]
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: error_description
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "302":
+          $ref: "#/components/responses/Redirect"
+        "404":
+          $ref: "#/components/responses/OIDCNotConfigured"
         default:
           $ref: "#/components/responses/Error"
   /api/v1/me:
@@ -119,6 +207,9 @@ paths:
       description: |
         Меняет пароль при верном текущем и удаляет все остальные сессии пользователя;
         текущая остаётся. Неверный текущий пароль расходует бюджет ограничителя.
+        Пользователю без пароля панели первый пароль задаётся без `current_password`,
+        сессии не трогаются. Если вход по паролю выключен, а пользователь привязан к
+        OIDC — 403 `password_login_disabled`.
       tags: [auth]
       requestBody:
         required: true
@@ -138,13 +229,69 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: "`invalid_credentials` (неверный текущий пароль) или `cross_origin`"
+          description: "`invalid_credentials` (неверный текущий пароль), `password_login_disabled` или `cross_origin`"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
         "429":
           $ref: "#/components/responses/TooManyAttempts"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/me/oidc:
+    post:
+      operationId: startOIDCLink
+      summary: Начать привязку OIDC
+      description: |
+        Ставит cookie потока `ksb_oidc` с признаком привязки и возвращает адрес
+        провайдера; клиент переходит на него. Повторная привязка заменяет прежнюю.
+      tags: [auth]
+      responses:
+        "200":
+          description: Адрес авторизации у провайдера
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OIDCLinkStart"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/CrossOrigin"
+        "404":
+          $ref: "#/components/responses/OIDCNotConfigured"
+        "409":
+          description: "`oidc_wrong_host`: панель открыта не по `KSB_PUBLIC_URL`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: "`oidc_unavailable`: провайдер недоступен"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: unlinkOIDC
+      summary: Отвязать OIDC
+      tags: [auth]
+      responses:
+        "204":
+          description: Привязки нет
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/CrossOrigin"
+        "404":
+          $ref: "#/components/responses/OIDCNotConfigured"
+        "409":
+          description: "`last_login_method`: у пользователя нет пароля панели"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         default:
           $ref: "#/components/responses/Error"
   /api/v1/setup:
@@ -700,6 +847,18 @@ components:
       schema:
         type: string
   responses:
+    Redirect:
+      description: Перенаправление браузера
+      headers:
+        Location:
+          schema:
+            type: string
+    OIDCNotConfigured:
+      description: "`not_found`: OIDC не настроен"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
     NotFound:
       description: "`not_found`: устройства нет или оно недоступно владельцу сессии"
       content:
@@ -793,12 +952,51 @@ components:
       enum: [admin, user]
     Me:
       type: object
-      required: [username, role]
+      required: [username, role, has_password, oidc_linked]
       properties:
         username:
           type: string
         role:
           $ref: "#/components/schemas/Role"
+        has_password:
+          type: boolean
+          description: Задан ли пароль панели.
+        oidc_linked:
+          type: boolean
+          description: Привязана ли учётка OIDC-провайдера.
+    AuthMethods:
+      type: object
+      required: [password]
+      properties:
+        password:
+          type: string
+          enum: ["on", unlinked]
+          x-enum-varnames: [PasswordOn, PasswordUnlinked]
+          description: |
+            `on` — вход по паролю для всех; `unlinked` — только для пользователей без
+            привязки OIDC.
+        oidc:
+          $ref: "#/components/schemas/OIDCMethod"
+    OIDCMethod:
+      type: object
+      description: Есть, только если OIDC настроен.
+      required: [name, origin]
+      properties:
+        name:
+          type: string
+          description: Подпись кнопки входа.
+          example: Zitadel
+        origin:
+          type: string
+          description: Публичный адрес панели (`KSB_PUBLIC_URL`); привязка работает только с него.
+          example: https://books.example.com
+    OIDCLinkStart:
+      type: object
+      required: [authorize_url]
+      properties:
+        authorize_url:
+          type: string
+          description: Адрес авторизации у провайдера.
     LoginRequest:
       type: object
       required: [username, password]
@@ -810,11 +1008,12 @@ components:
           format: password
     ChangePasswordRequest:
       type: object
-      required: [current_password, new_password]
+      required: [new_password]
       properties:
         current_password:
           type: string
           format: password
+          description: Не нужен пользователю без пароля панели (первый пароль).
         new_password:
           type: string
           format: password

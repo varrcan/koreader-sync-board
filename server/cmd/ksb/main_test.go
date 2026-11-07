@@ -129,3 +129,56 @@ func TestUserPasswd(t *testing.T) {
 		t.Fatalf("unknown user: %d %s", code, out)
 	}
 }
+
+func TestUserRoleAndOIDCUnlink(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KSB_DATA_DIR", dir)
+	ksb := func(args ...string) (string, int) {
+		var out, errb bytes.Buffer
+		code := run(args, &out, &errb)
+		return out.String() + errb.String(), code
+	}
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(dir, store.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	acc := accounts.New(db)
+	if _, err := acc.CreateOIDCUser(ctx, "alice", accounts.RoleUser, "https://id.example.com", "1"); err != nil {
+		t.Fatal(err)
+	}
+
+	if out, _ := ksb("user", "list"); !regexp.MustCompile(`(?m)^alice\s+user\s+linked\s`).MatchString(out) {
+		t.Fatalf("user list: %s", out)
+	}
+	if out, code := ksb("user", "role", "alice", "admin"); code != 0 {
+		t.Fatalf("role: %d %s", code, out)
+	}
+	if u, err := acc.UserByIdentity(ctx, "https://id.example.com", "1"); err != nil || u.Role != accounts.RoleAdmin {
+		t.Fatalf("after role: %+v %v", u, err)
+	}
+	if out, code := ksb("user", "role", "alice", "root"); code != 1 {
+		t.Fatalf("bad role: %d %s", code, out)
+	}
+	if out, code := ksb("user", "role", "ghost", "admin"); code != 1 || !strings.Contains(out, "not found") {
+		t.Fatalf("unknown user: %d %s", code, out)
+	}
+	if _, code := ksb("user", "role", "alice"); code != 2 {
+		t.Fatal("missing role should exit 2")
+	}
+
+	// Отвязка без проверок: у alice нет пароля панели.
+	if out, code := ksb("user", "oidc-unlink", "alice"); code != 0 {
+		t.Fatalf("unlink: %d %s", code, out)
+	}
+	if _, err := acc.UserByIdentity(ctx, "https://id.example.com", "1"); !errors.Is(err, accounts.ErrNotFound) {
+		t.Fatalf("still linked: %v", err)
+	}
+	if out, _ := ksb("user", "list"); !regexp.MustCompile(`(?m)^alice\s+admin\s+-\s`).MatchString(out) {
+		t.Fatalf("user list after unlink: %s", out)
+	}
+	if out, code := ksb("user", "oidc-unlink", "ghost"); code != 1 || !strings.Contains(out, "not found") {
+		t.Fatalf("unknown user: %d %s", code, out)
+	}
+}

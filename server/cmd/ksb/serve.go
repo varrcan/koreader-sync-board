@@ -21,6 +21,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
 	"github.com/varrcan/koreader-sync-board/server/internal/server"
+	"github.com/varrcan/koreader-sync-board/server/internal/sso"
 	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
 	"github.com/varrcan/koreader-sync-board/server/internal/web"
@@ -61,6 +62,15 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 		log.Warn("setup required", "setup_code", setup.Generate(), "url", "/setup")
 	}
 
+	// Провайдер не запрашивается при старте: недоступный IdP не должен мешать kosync.
+	var provider *sso.Provider
+	if cfg.OIDC != nil {
+		provider = sso.New(cfg.OIDC)
+		log.Info("oidc enabled", "issuer", cfg.OIDC.Issuer, "redirect_uri", cfg.OIDC.RedirectURL(),
+			"auto_create", cfg.OIDC.AutoCreate, "admin_claim", cfg.OIDC.AdminClaim,
+			"panel_password_login", cfg.PanelPasswordLogin)
+	}
+
 	ip := clientip.New(cfg.TrustedProxies)
 	prog := progress.New(db)
 	stats := statistics.New(db, cfg.DataDir, log)
@@ -77,6 +87,9 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 			Progress:   prog,
 			Statistics: stats,
 			Log:        log,
+			SSO:        provider,
+
+			PasswordLoginUnlinkedOnly: !cfg.PanelPasswordLogin,
 		}),
 		WebDAV: webdav.New(acc, stats, ip, log),
 		Web:    web.Handler(),

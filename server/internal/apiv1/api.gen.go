@@ -15,6 +15,24 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AuthMethodsPassword.
+const (
+	PasswordOn       AuthMethodsPassword = "on"
+	PasswordUnlinked AuthMethodsPassword = "unlinked"
+)
+
+// Valid indicates whether the value is a known member of the AuthMethodsPassword enum.
+func (e AuthMethodsPassword) Valid() bool {
+	switch e {
+	case PasswordOn:
+		return true
+	case PasswordUnlinked:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BookFilter.
 const (
 	Finished BookFilter = "finished"
@@ -155,6 +173,20 @@ type ActivityPage struct {
 	NextCursor *string        `json:"next_cursor"`
 }
 
+// AuthMethods defines model for AuthMethods.
+type AuthMethods struct {
+	// Oidc Есть, только если OIDC настроен.
+	Oidc *OIDCMethod `json:"oidc,omitempty"`
+
+	// Password `on` — вход по паролю для всех; `unlinked` — только для пользователей без
+	// привязки OIDC.
+	Password AuthMethodsPassword `json:"password"`
+}
+
+// AuthMethodsPassword `on` — вход по паролю для всех; `unlinked` — только для пользователей без
+// привязки OIDC.
+type AuthMethodsPassword string
+
 // Book defines model for Book.
 type Book struct {
 	Authors *string `json:"authors"`
@@ -269,8 +301,9 @@ type BookStatistics struct {
 
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
-	CurrentPassword string `json:"current_password"`
-	NewPassword     string `json:"new_password"`
+	// CurrentPassword Не нужен пользователю без пароля панели (первый пароль).
+	CurrentPassword *string `json:"current_password,omitempty"`
+	NewPassword     string  `json:"new_password"`
 }
 
 // CreateDeviceRequest defines model for CreateDeviceRequest.
@@ -343,8 +376,32 @@ type LoginRequest struct {
 
 // Me defines model for Me.
 type Me struct {
-	Role     Role   `json:"role"`
-	Username string `json:"username"`
+	// HasPassword Задан ли пароль панели.
+	HasPassword bool `json:"has_password"`
+
+	// OidcLinked Привязана ли учётка OIDC-провайдера.
+	OidcLinked bool   `json:"oidc_linked"`
+	Role       Role   `json:"role"`
+	Username   string `json:"username"`
+}
+
+// OIDCLinkStart defines model for OIDCLinkStart.
+type OIDCLinkStart struct {
+	// AuthorizeUrl Адрес авторизации у провайдера.
+	AuthorizeUrl string `json:"authorize_url"`
+}
+
+// OIDCMethod Есть, только если OIDC настроен.
+type OIDCMethod struct {
+	// Name Подпись кнопки входа.
+	//
+	// Example: Zitadel
+	Name string `json:"name"`
+
+	// Origin Публичный адрес панели (`KSB_PUBLIC_URL`); привязка работает только с него.
+	//
+	// Example: https://books.example.com
+	Origin string `json:"origin"`
 }
 
 // ReadingSession defines model for ReadingSession.
@@ -581,6 +638,9 @@ type Forbidden = Error
 // NotFound defines model for NotFound.
 type NotFound = Error
 
+// OIDCNotConfigured defines model for OIDCNotConfigured.
+type OIDCNotConfigured = Error
+
 // TooManyAttempts defines model for TooManyAttempts.
 type TooManyAttempts = Error
 
@@ -597,6 +657,20 @@ type ListActivityParams struct {
 
 	// Cursor `next_cursor` предыдущей страницы; клиент его не разбирает.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// OidcCallbackParams defines parameters for OidcCallback.
+type OidcCallbackParams struct {
+	Code             *string `form:"code,omitempty" json:"code,omitempty"`
+	State            *string `form:"state,omitempty" json:"state,omitempty"`
+	Error            *string `form:"error,omitempty" json:"error,omitempty"`
+	ErrorDescription *string `form:"error_description,omitempty" json:"error_description,omitempty"`
+}
+
+// OidcLoginParams defines parameters for OidcLogin.
+type OidcLoginParams struct {
+	// Redirect Путь внутри панели, куда вернуться после входа; иной заменяется на `/`.
+	Redirect *string `form:"redirect,omitempty" json:"redirect,omitempty"`
 }
 
 // ListBooksParams defines parameters for ListBooks.
@@ -675,6 +749,15 @@ type ServerInterface interface {
 	// Logout Выход
 	// (POST /api/v1/auth/logout)
 	Logout(w http.ResponseWriter, r *http.Request)
+	// GetAuthMethods Способы входа
+	// (GET /api/v1/auth/methods)
+	GetAuthMethods(w http.ResponseWriter, r *http.Request)
+	// OidcCallback Возврат с OIDC-провайдера
+	// (GET /api/v1/auth/oidc/callback)
+	OidcCallback(w http.ResponseWriter, r *http.Request, params OidcCallbackParams)
+	// OidcLogin Начать вход через OIDC
+	// (GET /api/v1/auth/oidc/login)
+	OidcLogin(w http.ResponseWriter, r *http.Request, params OidcLoginParams)
 	// ListBooks Книги
 	// (GET /api/v1/books)
 	ListBooks(w http.ResponseWriter, r *http.Request, params ListBooksParams)
@@ -705,6 +788,12 @@ type ServerInterface interface {
 	// GetMe Текущий пользователь
 	// (GET /api/v1/me)
 	GetMe(w http.ResponseWriter, r *http.Request)
+	// UnlinkOIDC Отвязать OIDC
+	// (DELETE /api/v1/me/oidc)
+	UnlinkOIDC(w http.ResponseWriter, r *http.Request)
+	// StartOIDCLink Начать привязку OIDC
+	// (POST /api/v1/me/oidc)
+	StartOIDCLink(w http.ResponseWriter, r *http.Request)
 	// ChangePassword Смена своего пароля панели
 	// (PUT /api/v1/me/password)
 	ChangePassword(w http.ResponseWriter, r *http.Request)
@@ -824,6 +913,125 @@ func (siw *ServerInterfaceWrapper) Logout(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.Logout(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAuthMethods operation middleware
+func (siw *ServerInterfaceWrapper) GetAuthMethods(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAuthMethods(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// OidcCallback operation middleware
+func (siw *ServerInterfaceWrapper) OidcCallback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params OidcCallbackParams
+
+	// ------------- Optional query parameter "code" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "code", r.URL.Query(), &params.Code, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "code"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "code", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "state"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "error" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "error", r.URL.Query(), &params.Error, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "error"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "error", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "error_description" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "error_description", r.URL.Query(), &params.ErrorDescription, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "error_description"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "error_description", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.OidcCallback(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// OidcLogin operation middleware
+func (siw *ServerInterfaceWrapper) OidcLogin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params OidcLoginParams
+
+	// ------------- Optional query parameter "redirect" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "redirect", r.URL.Query(), &params.Redirect, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "redirect"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "redirect", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.OidcLogin(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1085,6 +1293,34 @@ func (siw *ServerInterfaceWrapper) GetMe(w http.ResponseWriter, r *http.Request)
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetMe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UnlinkOIDC operation middleware
+func (siw *ServerInterfaceWrapper) UnlinkOIDC(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UnlinkOIDC(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartOIDCLink operation middleware
+func (siw *ServerInterfaceWrapper) StartOIDCLink(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartOIDCLink(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1454,8 +1690,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/version", wrapper.GetVersion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/auth/login", wrapper.Login)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/auth/logout", wrapper.Logout)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/auth/methods", wrapper.GetAuthMethods)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/auth/oidc/login", wrapper.OidcLogin)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/auth/oidc/callback", wrapper.OidcCallback)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/me", wrapper.GetMe)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/me/password", wrapper.ChangePassword)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/me/oidc", wrapper.UnlinkOIDC)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/me/oidc", wrapper.StartOIDCLink)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/setup", wrapper.GetSetup)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/setup", wrapper.CompleteSetup)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/devices", wrapper.ListDevices)

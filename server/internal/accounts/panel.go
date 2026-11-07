@@ -45,20 +45,16 @@ func (s *Service) CountUsers(ctx context.Context) (int, error) {
 // одинаково. Кеша удачных проверок и памяти отвергнутых пар нет: человек вводит
 // пароль редко, а повтор одного неверного пароля — это и есть подбор.
 func (s *Service) VerifyPanelPassword(ctx context.Context, username, password string, client netip.Addr) (User, error) {
-	var u User
-	var created int64
 	var hash sql.NullString
-	var disabled sql.NullInt64
-	err := s.db.Read.QueryRowContext(ctx,
-		`SELECT id, username, role, created_at, disabled_at, panel_password_hash FROM users WHERE username = ?`,
-		username).Scan(&u.ID, &u.Username, &u.Role, &created, &disabled, &hash)
+	u, err := scanUser(s.db.Read.QueryRowContext(ctx,
+		`SELECT `+userColumns+`, u.panel_password_hash FROM users u WHERE u.username = ?`, username), &hash)
 	var reject error
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		reject = ErrUnknownUser
 	case err != nil:
 		return User{}, err
-	case disabled.Valid, !hash.Valid:
+	case u.DisabledAt != nil, !hash.Valid:
 		reject = ErrUnauthorized
 	}
 
@@ -80,7 +76,6 @@ func (s *Service) VerifyPanelPassword(ctx context.Context, username, password st
 		return User{}, reject
 	}
 	att.Release()
-	u.CreatedAt = time.Unix(created, 0)
 	return u, nil
 }
 
@@ -115,6 +110,28 @@ func (s *Service) SetPanelPassword(ctx context.Context, username, password strin
 	return tx.Commit()
 }
 
+// SetFirstPanelPassword задаёт пароль панели пользователю, у которого его нет
+// (создан OIDC-входом), не трогая сессии: личность уже подтверждена сессией.
+// Пароль уже задан — ErrUnauthorized, менять его нужно через проверку текущего.
+func (s *Service) SetFirstPanelPassword(ctx context.Context, userID int64, password string) error {
+	if !ValidPanelPassword(password) {
+		return ErrInvalidPassword
+	}
+	hash, err := s.hash(password)
+	if err != nil {
+		return err
+	}
+	res, err := s.db.Write.ExecContext(ctx,
+		`UPDATE users SET panel_password_hash = ? WHERE id = ? AND panel_password_hash IS NULL`, hash, userID)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return ErrUnauthorized
+	}
+	return nil
+}
+
 // CreateFirstAdmin создаёт администратора с паролем панели, только если
 // пользователей нет. Проверка и вставка — один запрос, поэтому из двух
 // одновременных вызовов (мастер и CLI, два мастера) выигрывает один, а второй
@@ -142,7 +159,7 @@ func (s *Service) CreateFirstAdmin(ctx context.Context, username, password strin
 		return User{}, ErrSetupCompleted
 	}
 	id, _ := res.LastInsertId()
-	return User{ID: id, Username: username, Role: RoleAdmin, CreatedAt: time.Unix(now, 0)}, nil
+	return User{ID: id, Username: username, Role: RoleAdmin, CreatedAt: time.Unix(now, 0), HasPassword: true}, nil
 }
 
 // CreateSession открывает сессию и возвращает её токен. Токен в базе не
@@ -188,13 +205,12 @@ func (s *Service) SessionByToken(ctx context.Context, token string) (Session, Us
 	hash := sha256.Sum256([]byte(token))
 	now := s.now().Unix()
 	var sess Session
-	var u User
-	var lastUsed, expires, created int64
-	err := s.db.Read.QueryRowContext(ctx, `
-		SELECT s.id, s.last_used_at, s.expires_at, u.id, u.username, u.role, u.created_at
+	var lastUsed, expires int64
+	u, err := scanUser(s.db.Read.QueryRowContext(ctx, `
+		SELECT `+userColumns+`, s.id, s.last_used_at, s.expires_at
 		FROM sessions s JOIN users u ON u.id = s.user_id
 		WHERE s.token_hash = ? AND s.expires_at > ? AND u.disabled_at IS NULL`,
-		hash[:], now).Scan(&sess.ID, &lastUsed, &expires, &u.ID, &u.Username, &u.Role, &created)
+		hash[:], now), &sess.ID, &lastUsed, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, User{}, ErrUnauthorized
 	}
@@ -202,7 +218,6 @@ func (s *Service) SessionByToken(ctx context.Context, token string) (Session, Us
 		return Session{}, User{}, err
 	}
 	sess.UserID = u.ID
-	u.CreatedAt = time.Unix(created, 0)
 	if now-lastUsed >= int64(lastUsedInterval/time.Second) {
 		expires = now + int64(SessionTTL/time.Second)
 		if _, err := s.db.Write.ExecContext(ctx,

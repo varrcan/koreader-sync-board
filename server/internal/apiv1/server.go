@@ -10,6 +10,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/buildinfo"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
+	"github.com/varrcan/koreader-sync-board/server/internal/sso"
 	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
 )
 
@@ -24,6 +25,11 @@ type Server struct {
 	Progress   *progress.Store
 	Statistics *statistics.Store
 	Log        *slog.Logger
+	// SSO — OIDC-провайдер; nil — OIDC не настроен, его эндпоинты отвечают 404.
+	SSO *sso.Provider
+	// PasswordLoginUnlinkedOnly — вход по паролю только для пользователей без
+	// привязки OIDC (KSB_PANEL_PASSWORD_LOGIN=false).
+	PasswordLoginUnlinkedOnly bool
 }
 
 var _ ServerInterface = (*Server)(nil)
@@ -45,7 +51,16 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	if s.authFailed(w, r, req.Username, err, http.StatusUnauthorized) {
 		return
 	}
+	// Пароль уже проверен: статус выдаёт факт привязки только знающему пароль.
+	if s.passwordDisabled(u) {
+		writeError(w, http.StatusForbidden, "password_login_disabled", "password login is disabled for users linked to OIDC")
+		return
+	}
 	s.openSession(w, r, u)
+}
+
+func (s *Server) passwordDisabled(u accounts.User) bool {
+	return s.PasswordLoginUnlinkedOnly && u.OIDCLinked
 }
 
 func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
@@ -75,12 +90,34 @@ func (s *Server) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	if s.passwordDisabled(cur.User) {
+		writeError(w, http.StatusForbidden, "password_login_disabled", "password login is disabled for users linked to OIDC")
+		return
+	}
 	// Длина проверяется до текущего пароля: ошибка ввода не тратит бюджет.
 	if !accounts.ValidPanelPassword(req.NewPassword) {
 		writeError(w, http.StatusBadRequest, "invalid_password", accounts.ErrInvalidPassword.Error())
 		return
 	}
-	_, err := s.Accounts.VerifyPanelPassword(r.Context(), cur.User.Username, req.CurrentPassword, s.Auth.ClientAddr(r))
+	// Первый пароль (пользователь создан OIDC-входом): личность подтверждена
+	// сессией, текущего пароля нет. Если пароль успели задать в другой сессии,
+	// запрос проверяется как обычная смена без текущего пароля.
+	if req.CurrentPassword == nil && !cur.User.HasPassword {
+		err := s.Accounts.SetFirstPanelPassword(r.Context(), cur.User.ID, req.NewPassword)
+		if err == nil {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if !errors.Is(err, accounts.ErrUnauthorized) {
+			s.internal(w, "set first password", err)
+			return
+		}
+	}
+	var current string
+	if req.CurrentPassword != nil {
+		current = *req.CurrentPassword
+	}
+	_, err := s.Accounts.VerifyPanelPassword(r.Context(), cur.User.Username, current, s.Auth.ClientAddr(r))
 	if s.authFailed(w, r, cur.User.Username, err, http.StatusForbidden) {
 		return
 	}
@@ -161,7 +198,7 @@ func (s *Server) internal(w http.ResponseWriter, op string, err error) {
 }
 
 func me(u accounts.User) Me {
-	return Me{Username: u.Username, Role: Role(u.Role)}
+	return Me{Username: u.Username, Role: Role(u.Role), HasPassword: u.HasPassword, OidcLinked: u.OIDCLinked}
 }
 
 // decode читает JSON-тело в v; при ошибке отвечает 400 bad_request.

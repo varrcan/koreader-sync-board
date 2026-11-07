@@ -10,6 +10,7 @@ import { BookCover } from "@/components/BookCover";
 import { BookName, BookRow, ProgressBar } from "@/components/BookParts";
 import { devicesQuery } from "@/components/DeviceDialogs";
 import { HelpTrans, helpLink } from "@/components/HelpParts";
+import { HomeStats } from "@/components/HomeStats";
 import { MenuLabel, Value } from "@/components/KoreaderSetup";
 import { Button } from "@/components/ui/button";
 import { deviceLabel, formatPercent } from "@/lib/books";
@@ -157,7 +158,13 @@ export function HomePage() {
       {reading.isPending && <p className="text-sm text-muted-foreground">{t("common.loading")}</p>}
       {reading.isError && <p className="text-sm text-destructive">{t("common.loadError")}</p>}
 
-      {page && page.counts.all === 0 && me && <EmptyHome username={me.username} />}
+      {page && page.counts.all === 0 && me && (
+        <>
+          <EmptyHome username={me.username} />
+          {/* Статистика без прогресса — штатный случай: ради неё облако и настраивают. */}
+          <HomeStats hasBooks={false} />
+        </>
+      )}
 
       {page && page.counts.all > 0 && (
         <>
@@ -189,6 +196,7 @@ export function HomePage() {
               )}
             </section>
           )}
+          <HomeStats hasBooks />
           <section className="flex max-w-5xl flex-col gap-2.5 rounded-xl border bg-card p-5">
             <h2 className="text-[15px] leading-5 font-semibold">{t("home.syncs")}</h2>
             <ActivityFeed limit={10} />

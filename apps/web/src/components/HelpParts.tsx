@@ -17,8 +17,12 @@ type Components = Record<string, ReactElement>;
  * тег сразу, и текст ссылки оказывается снаружи.
  */
 export function HelpTrans({ k, components }: { k: TranslationKey; components?: Components }) {
-  return <Trans i18nKey={k} components={{ ...menuComponents, ...components }} />;
+  return <KeyTrans i18nKey={k} components={{ ...menuComponents, ...components }} />;
 }
+
+// Ключ уже проверен типом пропа k. Вывод дженериков Trans по объединению всех ключей
+// каталога упирается в предел сложности TypeScript (TS2590), поэтому сигнатура сужена.
+const KeyTrans = Trans as (props: { i18nKey: TranslationKey; components: Components }) => ReactElement;
 
 export function HelpText({
   k,

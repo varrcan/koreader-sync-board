@@ -533,6 +533,88 @@ paths:
                 $ref: "#/components/schemas/Error"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/statistics/summary:
+    get:
+      operationId: getStatisticsSummary
+      summary: Итоги статистики за период
+      description: |
+        Итоги статистики чтения владельца сессии (в том числе администратора — только
+        свои) за период по сегодня включительно и за такой же период перед ним. Дни и часы
+        считаются по часовому поясу `tz`. Страницы пересчитываются к текущему числу
+        страниц книги, как во вьюхе `page_stat` KOReader; за день книга даёт число
+        различных страниц, страницы периода — сумма дневных. Без снимка — нули,
+        `as_of = null`.
+      tags: [statistics]
+      parameters:
+        - name: period
+          in: query
+          required: true
+          description: "`week` — 7 дней, `month` — 30 дней, `year` — 12 календарных месяцев."
+          schema:
+            $ref: "#/components/schemas/StatisticsPeriod"
+        - $ref: "#/components/parameters/TimeZone"
+      responses:
+        "200":
+          description: Итоги периода
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatisticsSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/statistics/calendar:
+    get:
+      operationId: getStatisticsCalendar
+      summary: Календарь чтения
+      description: |
+        Время чтения по дням за 53 недели: с понедельника недели, начавшейся 52 недели
+        назад от текущей, по сегодня. Дни — по часовому поясу `tz`.
+      tags: [statistics]
+      parameters:
+        - $ref: "#/components/parameters/TimeZone"
+      responses:
+        "200":
+          description: Дни с чтением
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatisticsCalendar"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/statistics/sessions:
+    get:
+      operationId: listReadingSessions
+      summary: Сессии чтения
+      description: |
+        Сессии чтения владельца сессии от последней к более ранним. KOReader сессий не
+        хранит, их выводит сервер: подряд идущие записи одной книги, в которых начало
+        следующей записи отстоит от наибольшего конца предыдущих не больше чем на 10 минут.
+        Устройства у сессии нет: снимок — слияние всех читалок.
+      tags: [statistics]
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Страница сессий
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadingSessionPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
 components:
   parameters:
     DeviceID:
@@ -566,6 +648,14 @@ components:
       description: "`next_cursor` предыдущей страницы; клиент его не разбирает."
       schema:
         type: string
+    TimeZone:
+      name: tz
+      in: query
+      required: true
+      description: Часовой пояс IANA (`Europe/Moscow`, `UTC`), по которому считаются дни и часы.
+      schema:
+        type: string
+        example: Europe/Moscow
   headers:
     SessionCookie:
       description: "`ksb_session=…; Path=/; Max-Age=2592000; HttpOnly; SameSite=Lax` (`Secure` по HTTPS)"
@@ -977,3 +1067,176 @@ components:
           nullable: true
           allOf:
             - $ref: "#/components/schemas/StatisticsSnapshot"
+    StatisticsPeriod:
+      type: string
+      enum: [week, month, year]
+    StatisticsTotals:
+      type: object
+      required: [duration, pages, sessions, days]
+      properties:
+        duration:
+          type: integer
+          format: int64
+          description: Время чтения, секунды.
+        pages:
+          type: integer
+          description: Сумма различных страниц по дням.
+        sessions:
+          type: integer
+          description: Сессии, начатые в периоде.
+        days:
+          type: integer
+          description: Дни с чтением.
+    StatisticsBucket:
+      type: object
+      required: [date, duration, pages, no_data]
+      properties:
+        date:
+          type: string
+          format: date
+          description: День или первый день месяца.
+        duration:
+          type: integer
+          format: int64
+        pages:
+          type: integer
+        no_data:
+          type: boolean
+          description: |
+            День позже дня `as_of` (месяц — если все его дни такие): данных за него у
+            сервера ещё нет, это не день без чтения.
+    StatisticsBookRef:
+      type: object
+      required: [title, authors, hash, has_progress]
+      properties:
+        title:
+          type: string
+          nullable: true
+          description: |
+            Из `metadata` синхронизаций прогресса пользователя по тому же хешу, а если её
+            нет — из статистики чтения.
+        authors:
+          type: string
+          nullable: true
+        hash:
+          type: string
+          nullable: true
+          description: "`null` у книги статистики без хеша."
+        has_progress:
+          type: boolean
+          description: Есть ли у пользователя прогресс по этому хешу (карточка книги).
+    StatisticsBook:
+      allOf:
+        - $ref: "#/components/schemas/StatisticsBookRef"
+        - type: object
+          required: [duration, pages]
+          properties:
+            duration:
+              type: integer
+              format: int64
+            pages:
+              type: integer
+    StatisticsSummary:
+      type: object
+      required: [period, from, to, bucket, as_of, totals, previous, series, hours, books]
+      properties:
+        period:
+          $ref: "#/components/schemas/StatisticsPeriod"
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+          description: Сегодня в поясе `tz`.
+        bucket:
+          type: string
+          enum: [day, month]
+        as_of:
+          type: string
+          format: date-time
+          nullable: true
+          description: Время приёма снимка; `null`, если статистики нет.
+        totals:
+          $ref: "#/components/schemas/StatisticsTotals"
+        previous:
+          $ref: "#/components/schemas/StatisticsTotals"
+        series:
+          type: array
+          description: По элементу на каждый день периода (для `year` — на каждый месяц).
+          items:
+            $ref: "#/components/schemas/StatisticsBucket"
+        hours:
+          type: array
+          description: 24 значения — время чтения за период по часу начала записи, секунды.
+          minItems: 24
+          maxItems: 24
+          items:
+            type: integer
+            format: int64
+        books:
+          type: array
+          description: До 10 книг с наибольшим временем в периоде.
+          items:
+            $ref: "#/components/schemas/StatisticsBook"
+    StatisticsDay:
+      type: object
+      required: [date, duration]
+      properties:
+        date:
+          type: string
+          format: date
+        duration:
+          type: integer
+          format: int64
+    StatisticsCalendar:
+      type: object
+      required: [from, to, as_of, days]
+      properties:
+        from:
+          type: string
+          format: date
+          description: Понедельник.
+        to:
+          type: string
+          format: date
+        as_of:
+          type: string
+          format: date-time
+          nullable: true
+        days:
+          type: array
+          description: Только дни с чтением, по возрастанию даты.
+          items:
+            $ref: "#/components/schemas/StatisticsDay"
+    ReadingSession:
+      type: object
+      required: [book, started_at, ended_at, duration, pages]
+      properties:
+        book:
+          $ref: "#/components/schemas/StatisticsBookRef"
+        started_at:
+          type: string
+          format: date-time
+        ended_at:
+          type: string
+          format: date-time
+          description: Наибольший конец записи сессии.
+        duration:
+          type: integer
+          format: int64
+          description: Сумма длительностей записей, секунды.
+        pages:
+          type: integer
+          description: Различные страницы сессии.
+    ReadingSessionPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReadingSession"
+        next_cursor:
+          type: string
+          nullable: true

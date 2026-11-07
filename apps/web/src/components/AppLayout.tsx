@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link, Outlet, useRouter } from "@tanstack/react-router";
-import { BookOpen, CircleHelp, House, KeyRound, LogOut, TabletSmartphone } from "lucide-react";
+import { BookOpen, ChartNoAxesColumn, CircleHelp, House, KeyRound, LogOut, TabletSmartphone } from "lucide-react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { api } from "@/api";
@@ -14,7 +14,7 @@ function NavLink({
   icon,
   children,
 }: {
-  to: "/" | "/books" | "/devices" | "/password" | "/help";
+  to: "/" | "/books" | "/statistics" | "/devices" | "/password" | "/help";
   icon: ReactNode;
   children: ReactNode;
 }) {
@@ -86,6 +86,9 @@ export function AppLayout() {
           <NavLink to="/books" icon={<BookOpen />}>
             {t("nav.books")}
           </NavLink>
+          <NavLink to="/statistics" icon={<ChartNoAxesColumn />}>
+            {t("nav.statistics")}
+          </NavLink>
           <NavLink to="/devices" icon={<TabletSmartphone />}>
             {t("nav.devices")}
           </NavLink>
@@ -121,14 +124,19 @@ export function AppLayout() {
                 <BookOpen />
               </Link>
             </Button>
+            {/* Смена пароля с телефона — ссылкой на экране «Устройства». */}
+            <Button variant="ghost" size="icon-sm" asChild title={t("nav.statistics")} aria-label={t("nav.statistics")}>
+              <Link
+                to="/statistics"
+                activeOptions={{ includeSearch: false }}
+                activeProps={{ className: "bg-accent text-foreground" }}
+              >
+                <ChartNoAxesColumn />
+              </Link>
+            </Button>
             <Button variant="ghost" size="icon-sm" asChild title={t("nav.devices")} aria-label={t("nav.devices")}>
               <Link to="/devices" activeProps={{ className: "bg-accent text-foreground" }}>
                 <TabletSmartphone />
-              </Link>
-            </Button>
-            <Button variant="ghost" size="icon-sm" asChild title={t("nav.password")} aria-label={t("nav.password")}>
-              <Link to="/password">
-                <KeyRound />
               </Link>
             </Button>
             <Button variant="ghost" size="icon-sm" asChild title={t("nav.help")} aria-label={t("nav.help")}>

@@ -1,5 +1,6 @@
 import type { Device, DeviceWithPassword } from "@ksb/api-client";
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Ban, KeyRound, Pencil, Plus, TabletSmartphone } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -127,6 +128,13 @@ export function DevicesPage() {
         <div className="flex min-w-0 flex-1 flex-col gap-1.5">
           <h1 className="font-serif text-[clamp(24px,4vw,30px)] leading-tight font-medium">{t("devices.title")}</h1>
           <p className="text-sm text-pretty text-muted-foreground">{t("devices.description")}</p>
+          <Link
+            to="/password"
+            className="flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-foreground [&_svg]:size-4"
+          >
+            <KeyRound />
+            {t("devices.changePassword")}
+          </Link>
         </div>
         {active.length > 0 && addButton}
       </div>

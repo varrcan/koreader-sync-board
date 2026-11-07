@@ -184,6 +184,31 @@ first.
 - `book.md5` is always the partial MD5. A user whose progress sync uses filename hashing
   (`md5(basename)`) gets no titles from statistics, because the hashes never match.
 
+### How the panel counts
+
+- **Pages** follow KOReader's `page_stat` view: a record of page `page` out of `total_pages`
+  maps to the book's current `pages` as `first = ((page - 1) * pages) / total_pages + 1`,
+  `last = max(first, (page * pages) / total_pages)`, with integer division and at most 1000
+  pages (the view joins the `numbers` table, 1–1000). Records of a book with `pages IS NULL`
+  or with `total_pages = 0` drop out of the view and are ignored for both time and pages; a
+  book with `pages = 0` still yields page 1, as in the view. A day counts each distinct
+  (book, page) once, which matches `getDaysFromPeriod`. Weeks, months and years are sums of
+  days, so they can exceed KOReader's weekly and monthly summaries, where a page counts once
+  per week or month.
+- **Time** is the sum of raw `duration`. The view divides a record's time by its page count
+  and drops the remainder; on a real two-year database that is a few seconds.
+- **Book** is the document hash: KOReader's `book` rows are unique by title, authors and
+  `md5`, so editing metadata leaves several rows for one hash, and they are merged.
+- **Sessions** are not stored by KOReader (`page_stat_data` holds page records only). The
+  server derives them: consecutive records of one book where each record starts no more than
+  10 minutes after the latest end so far (records from two readers may overlap). The gap is
+  above KOReader's default per-page cap of 120 s (`max_sec`), so leaving a page open does
+  not split a session. Sessions carry no device: the snapshot merges all readers.
+- **Days and hours** use the browser's IANA time zone, sent as `tz`. KOReader uses the
+  reader's `localtime`, so readers in another zone can disagree around midnight. The time
+  zone database is embedded in the binary.
+- Days after the snapshot was received have no data yet and are shown hatched, not as zero.
+
 ## Storage model
 
 - `progress_events` is append-only (an `UPDATE` trigger aborts). Every accepted

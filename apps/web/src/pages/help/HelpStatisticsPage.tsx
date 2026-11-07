@@ -47,6 +47,13 @@ export function HelpStatisticsPage() {
       <HelpSection id="folders" title={t("help.statistics.folders.title")}>
         <HelpText k="help.statistics.folders.text" />
       </HelpSection>
+
+      <HelpSection id="numbers" title={t("help.statistics.numbers.title")}>
+        <HelpText k="help.statistics.numbers.days" />
+        <HelpText k="help.statistics.numbers.pages" />
+        <HelpText k="help.statistics.numbers.sessions" />
+        <HelpText k="help.statistics.numbers.noData" />
+      </HelpSection>
     </HelpPage>
   );
 }

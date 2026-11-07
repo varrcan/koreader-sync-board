@@ -26,6 +26,16 @@ export type ActivityItem = Schemas["ActivityItem"];
 export type ActivityPage = Schemas["ActivityPage"];
 export type StatisticsSnapshot = Schemas["StatisticsSnapshot"];
 export type StatisticsState = Schemas["StatisticsState"];
+export type StatisticsPeriod = Schemas["StatisticsPeriod"];
+export type StatisticsTotals = Schemas["StatisticsTotals"];
+export type StatisticsBucket = Schemas["StatisticsBucket"];
+export type StatisticsBookRef = Schemas["StatisticsBookRef"];
+export type StatisticsBook = Schemas["StatisticsBook"];
+export type StatisticsSummary = Schemas["StatisticsSummary"];
+export type StatisticsDay = Schemas["StatisticsDay"];
+export type StatisticsCalendar = Schemas["StatisticsCalendar"];
+export type ReadingSession = Schemas["ReadingSession"];
+export type ReadingSessionPage = Schemas["ReadingSessionPage"];
 
 export type ApiClient = ReturnType<typeof createApiClient>;
 

@@ -17,6 +17,9 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	// Пояса панели (tz) не должны зависеть от zoneinfo системы: бинарник
+	// запускается и без Docker.
+	_ "time/tzdata"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/buildinfo"
 	"github.com/varrcan/koreader-sync-board/server/internal/config"

@@ -79,7 +79,7 @@ export function ActivityFeed({ hash, limit }: { hash?: string; limit?: number })
 
   return (
     <div className="flex flex-col gap-4">
-      {groupByDay(items, now).map((d) => (
+      {groupByDay(items, now, (item) => item.ended_at).map((d) => (
         <section key={d.day.getTime()} className="flex flex-col">
           <h3 className="pb-1.5 text-xs font-medium tracking-[.06em] text-muted-foreground uppercase">
             {d.ago === 0 ? t("feed.today") : d.ago === 1 ? t("feed.yesterday") : formatDay(d.day, i18n.language, now)}

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"time"
 
+	openapi_types "github.com/oapi-codegen/runtime/types"
+
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
 )
@@ -75,4 +77,129 @@ func (s *Server) writeStatistics(w http.ResponseWriter, r *http.Request, userID 
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) GetStatisticsSummary(w http.ResponseWriter, r *http.Request, params GetStatisticsSummaryParams) {
+	cur, _ := panelauth.FromContext(r.Context())
+	// oapi-codegen std-http значения enum не проверяет.
+	if !statistics.ValidPeriod(statistics.Period(params.Period)) {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid period")
+		return
+	}
+	loc, ok := timeZone(w, params.Tz)
+	if !ok {
+		return
+	}
+	sum, err := s.Statistics.Summary(r.Context(), cur.User.ID, statistics.Period(params.Period), loc, time.Now())
+	if err != nil {
+		s.internal(w, "statistics summary", err)
+		return
+	}
+	out := StatisticsSummary{
+		Period:   params.Period,
+		From:     day(sum.From),
+		To:       day(sum.To),
+		Bucket:   StatisticsSummaryBucketDay,
+		AsOf:     sum.AsOf,
+		Totals:   totals(sum.Totals),
+		Previous: totals(sum.Previous),
+		Series:   make([]StatisticsBucket, 0, len(sum.Series)),
+		Hours:    sum.Hours[:],
+		Books:    make([]StatisticsBook, 0, len(sum.Books)),
+	}
+	if sum.Monthly {
+		out.Bucket = StatisticsSummaryBucketMonth
+	}
+	for _, b := range sum.Series {
+		out.Series = append(out.Series, StatisticsBucket{Date: day(b.Date), Duration: b.Duration, Pages: b.Pages, NoData: b.NoData})
+	}
+	for _, b := range sum.Books {
+		out.Books = append(out.Books, StatisticsBook{
+			Title: b.Title, Authors: b.Authors, Hash: b.Hash, HasProgress: b.HasProgress,
+			Duration: b.Duration, Pages: b.Pages,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) GetStatisticsCalendar(w http.ResponseWriter, r *http.Request, params GetStatisticsCalendarParams) {
+	cur, _ := panelauth.FromContext(r.Context())
+	loc, ok := timeZone(w, params.Tz)
+	if !ok {
+		return
+	}
+	cal, err := s.Statistics.Calendar(r.Context(), cur.User.ID, loc, time.Now())
+	if err != nil {
+		s.internal(w, "statistics calendar", err)
+		return
+	}
+	out := StatisticsCalendar{From: day(cal.From), To: day(cal.To), AsOf: cal.AsOf, Days: make([]StatisticsDay, 0, len(cal.Days))}
+	for _, d := range cal.Days {
+		out.Days = append(out.Days, StatisticsDay{Date: day(d.Date), Duration: d.Duration})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) ListReadingSessions(w http.ResponseWriter, r *http.Request, params ListReadingSessionsParams) {
+	cur, _ := panelauth.FromContext(r.Context())
+	limit, _, ok := pageParams(w, params.Limit, nil)
+	if !ok {
+		return
+	}
+	var after *statistics.SessionCursor
+	if params.Cursor != nil {
+		c, err := statistics.ParseSessionCursor(*params.Cursor)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request", "invalid cursor")
+			return
+		}
+		after = &c
+	}
+	items, next, err := s.Statistics.Sessions(r.Context(), cur.User.ID, after, limit)
+	if err != nil {
+		s.internal(w, "reading sessions", err)
+		return
+	}
+	out := ReadingSessionPage{Items: make([]ReadingSession, 0, len(items))}
+	if next != nil {
+		c := next.String()
+		out.NextCursor = &c
+	}
+	for _, ses := range items {
+		out.Items = append(out.Items, ReadingSession{
+			Book:      bookRef(ses.Book),
+			StartedAt: ses.StartedAt,
+			EndedAt:   ses.EndedAt,
+			Duration:  ses.Duration,
+			Pages:     ses.Pages,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// timeZone разбирает пояс IANA. Пустая строка и Local отвергаются: LoadLocation
+// отдаёт для них UTC и пояс сервера, а не пользователя.
+func timeZone(w http.ResponseWriter, name string) (*time.Location, bool) {
+	if name == "" || name == "Local" {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid tz")
+		return nil, false
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid tz")
+		return nil, false
+	}
+	return loc, true
+}
+
+func day(t time.Time) openapi_types.Date {
+	return openapi_types.Date{Time: t}
+}
+
+func totals(t statistics.Totals) StatisticsTotals {
+	return StatisticsTotals{Duration: t.Duration, Pages: t.Pages, Sessions: t.Sessions, Days: t.Days}
+}
+
+func bookRef(b statistics.BookRef) StatisticsBookRef {
+	return StatisticsBookRef{Title: b.Title, Authors: b.Authors, Hash: b.Hash, HasProgress: b.HasProgress}
 }

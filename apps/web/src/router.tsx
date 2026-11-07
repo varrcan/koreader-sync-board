@@ -3,7 +3,7 @@ import { createRootRoute, createRoute, createRouter, Outlet, redirect } from "@t
 import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { meQuery, queryClient, safeRedirect, setupQuery } from "./auth";
-import type { BookFilter } from "@ksb/api-client";
+import type { BookFilter, StatisticsPeriod } from "@ksb/api-client";
 import { AppLayout } from "./components/AppLayout";
 import { BookPage } from "./pages/BookPage";
 import { BooksPage } from "./pages/BooksPage";
@@ -16,6 +16,7 @@ import { HelpTroubleshootingPage } from "./pages/help/HelpTroubleshootingPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { SetupPage } from "./pages/SetupPage";
+import { StatisticsPage } from "./pages/StatisticsPage";
 
 function Root() {
   const { t, i18n } = useTranslation();
@@ -92,6 +93,19 @@ const bookRoute = createRoute({
   component: BookPage,
 });
 
+const statisticsPeriods: readonly string[] = ["week", "month", "year"] satisfies StatisticsPeriod[];
+
+const statisticsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/statistics",
+  // Неделя — по умолчанию и при неизвестном периоде в адресе.
+  validateSearch: (search: Record<string, unknown>): { period?: StatisticsPeriod } =>
+    typeof search.period === "string" && statisticsPeriods.includes(search.period) && search.period !== "week"
+      ? { period: search.period as StatisticsPeriod }
+      : {},
+  component: StatisticsPage,
+});
+
 const devicesRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/devices",
@@ -135,6 +149,7 @@ const routeTree = rootRoute.addChildren([
     indexRoute,
     booksRoute,
     bookRoute,
+    statisticsRoute,
     devicesRoute,
     passwordRoute,
     helpRoute,

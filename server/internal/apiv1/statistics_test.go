@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"testing"
+	"time"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
 	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
@@ -138,4 +140,130 @@ func TestStatisticsImportConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	alice.upload(statsFile(t, "C")).expect(t, "conflict", 409, "conflict")
+}
+
+// recentStats — снимок с записями за последние часы: обработчики считают «сегодня»
+// по настоящим часам.
+func recentStats(t *testing.T, title string, sessions int) []byte {
+	t.Helper()
+	base := time.Now().Add(-time.Duration(sessions) * time.Hour).Unix()
+	var recs []statstest.Record
+	for i := range sessions {
+		recs = append(recs, statstest.Record{Page: int64(i + 1), StartTime: base + int64(i)*3600, Duration: 60, TotalPages: 10})
+	}
+	return statstest.Build(t, []statstest.Book{{ID: 1, Title: title, Authors: "N/A", MD5: fmt.Sprintf("%032x", len(title)),
+		Pages: 10, Records: recs}})
+}
+
+func TestStatisticsAggregatesWithoutSession(t *testing.T) {
+	e := newEnv(t)
+	b := e.browser()
+	b.do("GET", "/api/v1/statistics/summary?period=week&tz=UTC", nil).expect(t, "summary", 401, "unauthorized")
+	b.do("GET", "/api/v1/statistics/calendar?tz=UTC", nil).expect(t, "calendar", 401, "unauthorized")
+	b.do("GET", "/api/v1/statistics/sessions", nil).expect(t, "sessions", 401, "unauthorized")
+}
+
+func TestStatisticsAggregatesBadRequest(t *testing.T) {
+	e := newEnv(t)
+	e.admin()
+	alice := e.panelUser("alice", accounts.RoleUser)
+	for _, q := range []string{
+		"/api/v1/statistics/summary?period=week",
+		"/api/v1/statistics/summary?period=week&tz=",
+		"/api/v1/statistics/summary?period=week&tz=Local",
+		"/api/v1/statistics/summary?period=week&tz=Mars/Olympus",
+		"/api/v1/statistics/summary?period=decade&tz=UTC",
+		"/api/v1/statistics/summary?tz=UTC",
+		"/api/v1/statistics/calendar",
+		"/api/v1/statistics/calendar?tz=Local",
+		"/api/v1/statistics/sessions?limit=0",
+		"/api/v1/statistics/sessions?limit=101",
+		"/api/v1/statistics/sessions?cursor=17",
+		"/api/v1/statistics/sessions?cursor=abc.def",
+		"/api/v1/statistics/sessions?cursor=17.0",
+	} {
+		alice.do("GET", q, nil).expect(t, q, 400, "bad_request")
+	}
+}
+
+func TestStatisticsAggregatesEmpty(t *testing.T) {
+	e := newEnv(t)
+	e.admin()
+	alice := e.panelUser("alice", accounts.RoleUser)
+	r := alice.do("GET", "/api/v1/statistics/summary?period=week&tz=Europe/Moscow", nil)
+	r.expect(t, "summary", 200, "")
+	totals := r.body["totals"].(map[string]any)
+	if v, ok := r.body["as_of"]; !ok || v != nil || totals["duration"] != 0.0 || len(r.body["books"].([]any)) != 0 ||
+		len(r.body["series"].([]any)) != 7 || len(r.body["hours"].([]any)) != 24 || r.body["bucket"] != "day" {
+		t.Fatalf("summary %v", r.body)
+	}
+	r = alice.do("GET", "/api/v1/statistics/calendar?tz=UTC", nil)
+	r.expect(t, "calendar", 200, "")
+	if days, ok := r.body["days"].([]any); !ok || len(days) != 0 {
+		t.Fatalf("calendar %v", r.body)
+	}
+	r = alice.do("GET", "/api/v1/statistics/sessions", nil)
+	r.expect(t, "sessions", 200, "")
+	if items, ok := r.body["items"].([]any); !ok || len(items) != 0 || r.body["next_cursor"] != nil {
+		t.Fatalf("sessions %v", r.body)
+	}
+}
+
+func TestStatisticsAggregates(t *testing.T) {
+	e := newEnv(t)
+	e.admin()
+	admin := e.browser()
+	admin.login("admin", "admin-password").expect(t, "login", 200, "")
+	alice := e.panelUser("alice", accounts.RoleUser)
+	admin.upload(recentStats(t, "Admin book", 1)).expect(t, "admin import", 200, "")
+	alice.upload(recentStats(t, "Alice book", 3)).expect(t, "alice import", 200, "")
+
+	r := admin.do("GET", "/api/v1/statistics/summary?period=year&tz=UTC", nil)
+	r.expect(t, "summary", 200, "")
+	books := r.body["books"].([]any)
+	if len(books) != 1 || books[0].(map[string]any)["title"] != "Admin book" || r.body["bucket"] != "month" ||
+		len(r.body["series"].([]any)) != 12 {
+		t.Fatalf("admin summary %v", r.body)
+	}
+
+	r = alice.do("GET", "/api/v1/statistics/summary?period=week&tz=UTC", nil)
+	r.expect(t, "summary", 200, "")
+	today := time.Now().UTC().Format(time.DateOnly)
+	if r.body["to"] != today || r.body["period"] != "week" {
+		t.Fatalf("summary dates %v", r.body)
+	}
+	if _, err := time.Parse(time.RFC3339, r.body["as_of"].(string)); err != nil {
+		t.Fatalf("as_of %v", r.body["as_of"])
+	}
+	first := r.body["series"].([]any)[0].(map[string]any)
+	if _, err := time.Parse(time.DateOnly, first["date"].(string)); err != nil || first["no_data"] != false {
+		t.Fatalf("bucket %v", first)
+	}
+	if tot := r.body["totals"].(map[string]any); tot["duration"] != 180.0 || tot["sessions"] != 3.0 || tot["pages"] != 3.0 {
+		t.Fatalf("totals %v", tot)
+	}
+
+	// Сессии по одной: курсор на каждой странице, кроме последней.
+	var titles []string
+	path := "/api/v1/statistics/sessions?limit=2"
+	for range 5 {
+		r = alice.do("GET", path, nil)
+		r.expect(t, "sessions", 200, "")
+		for _, it := range r.body["items"].([]any) {
+			s := it.(map[string]any)
+			started, err := time.Parse(time.RFC3339, s["started_at"].(string))
+			if err != nil || started.Location() != time.UTC {
+				t.Fatalf("started_at %v", s["started_at"])
+			}
+			titles = append(titles, s["book"].(map[string]any)["title"].(string))
+		}
+		next, ok := r.body["next_cursor"].(string)
+		if !ok {
+			break
+		}
+		path = "/api/v1/statistics/sessions?limit=2&cursor=" + url.QueryEscape(next)
+	}
+	if len(titles) != 3 || r.body["next_cursor"] != nil {
+		t.Fatalf("sessions %v, last %v", titles, r.body)
+	}
 }

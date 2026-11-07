@@ -355,6 +355,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/statistics/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Итоги статистики за период
+         * @description Итоги статистики чтения владельца сессии (в том числе администратора — только
+         *     свои) за период по сегодня включительно и за такой же период перед ним. Дни и часы
+         *     считаются по часовому поясу `tz`. Страницы пересчитываются к текущему числу
+         *     страниц книги, как во вьюхе `page_stat` KOReader; за день книга даёт число
+         *     различных страниц, страницы периода — сумма дневных. Без снимка — нули,
+         *     `as_of = null`.
+         */
+        get: operations["getStatisticsSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/statistics/calendar": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Календарь чтения
+         * @description Время чтения по дням за 53 недели: с понедельника недели, начавшейся 52 недели
+         *     назад от текущей, по сегодня. Дни — по часовому поясу `tz`.
+         */
+        get: operations["getStatisticsCalendar"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/statistics/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Сессии чтения
+         * @description Сессии чтения владельца сессии от последней к более ранним. KOReader сессий не
+         *     хранит, их выводит сервер: подряд идущие записи одной книги, в которых начало
+         *     следующей записи отстоит от наибольшего конца предыдущих не больше чем на 10 минут.
+         *     Устройства у сессии нет: снимок — слияние всех читалок.
+         */
+        get: operations["listReadingSessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -571,6 +640,118 @@ export interface components {
         StatisticsState: {
             snapshot: components["schemas"]["StatisticsSnapshot"] | null;
         };
+        /** @enum {string} */
+        StatisticsPeriod: "week" | "month" | "year";
+        StatisticsTotals: {
+            /**
+             * Format: int64
+             * @description Время чтения, секунды.
+             */
+            duration: number;
+            /** @description Сумма различных страниц по дням. */
+            pages: number;
+            /** @description Сессии, начатые в периоде. */
+            sessions: number;
+            /** @description Дни с чтением. */
+            days: number;
+        };
+        StatisticsBucket: {
+            /**
+             * Format: date
+             * @description День или первый день месяца.
+             */
+            date: string;
+            /** Format: int64 */
+            duration: number;
+            pages: number;
+            /**
+             * @description День позже дня `as_of` (месяц — если все его дни такие): данных за него у
+             *     сервера ещё нет, это не день без чтения.
+             */
+            no_data: boolean;
+        };
+        StatisticsBookRef: {
+            /**
+             * @description Из `metadata` синхронизаций прогресса пользователя по тому же хешу, а если её
+             *     нет — из статистики чтения.
+             */
+            title: string | null;
+            authors: string | null;
+            /** @description `null` у книги статистики без хеша. */
+            hash: string | null;
+            /** @description Есть ли у пользователя прогресс по этому хешу (карточка книги). */
+            has_progress: boolean;
+        };
+        StatisticsBook: components["schemas"]["StatisticsBookRef"] & {
+            /** Format: int64 */
+            duration: number;
+            pages: number;
+        };
+        StatisticsSummary: {
+            period: components["schemas"]["StatisticsPeriod"];
+            /** Format: date */
+            from: string;
+            /**
+             * Format: date
+             * @description Сегодня в поясе `tz`.
+             */
+            to: string;
+            /** @enum {string} */
+            bucket: "day" | "month";
+            /**
+             * Format: date-time
+             * @description Время приёма снимка; `null`, если статистики нет.
+             */
+            as_of: string | null;
+            totals: components["schemas"]["StatisticsTotals"];
+            previous: components["schemas"]["StatisticsTotals"];
+            /** @description По элементу на каждый день периода (для `year` — на каждый месяц). */
+            series: components["schemas"]["StatisticsBucket"][];
+            /** @description 24 значения — время чтения за период по часу начала записи, секунды. */
+            hours: number[];
+            /** @description До 10 книг с наибольшим временем в периоде. */
+            books: components["schemas"]["StatisticsBook"][];
+        };
+        StatisticsDay: {
+            /** Format: date */
+            date: string;
+            /** Format: int64 */
+            duration: number;
+        };
+        StatisticsCalendar: {
+            /**
+             * Format: date
+             * @description Понедельник.
+             */
+            from: string;
+            /** Format: date */
+            to: string;
+            /** Format: date-time */
+            as_of: string | null;
+            /** @description Только дни с чтением, по возрастанию даты. */
+            days: components["schemas"]["StatisticsDay"][];
+        };
+        ReadingSession: {
+            book: components["schemas"]["StatisticsBookRef"];
+            /** Format: date-time */
+            started_at: string;
+            /**
+             * Format: date-time
+             * @description Наибольший конец записи сессии.
+             */
+            ended_at: string;
+            /**
+             * Format: int64
+             * @description Сумма длительностей записей, секунды.
+             */
+            duration: number;
+            /** @description Различные страницы сессии. */
+            pages: number;
+        };
+        ReadingSessionPage: {
+            items: components["schemas"]["ReadingSession"][];
+            next_cursor: string | null;
+        };
     };
     responses: {
         /** @description `not_found`: устройства нет или оно недоступно владельцу сессии */
@@ -665,6 +846,8 @@ export interface components {
         Limit: number;
         /** @description `next_cursor` предыдущей страницы; клиент его не разбирает. */
         Cursor: string;
+        /** @description Часовой пояс IANA (`Europe/Moscow`, `UTC`), по которому считаются дни и часы. */
+        TimeZone: string;
     };
     requestBodies: never;
     headers: {
@@ -1269,6 +1452,88 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    getStatisticsSummary: {
+        parameters: {
+            query: {
+                /** @description `week` — 7 дней, `month` — 30 дней, `year` — 12 календарных месяцев. */
+                period: components["schemas"]["StatisticsPeriod"];
+                /** @description Часовой пояс IANA (`Europe/Moscow`, `UTC`), по которому считаются дни и часы. */
+                tz: components["parameters"]["TimeZone"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Итоги периода */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatisticsSummary"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getStatisticsCalendar: {
+        parameters: {
+            query: {
+                /** @description Часовой пояс IANA (`Europe/Moscow`, `UTC`), по которому считаются дни и часы. */
+                tz: components["parameters"]["TimeZone"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Дни с чтением */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatisticsCalendar"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listReadingSessions: {
+        parameters: {
+            query?: {
+                /** @description Размер страницы. */
+                limit?: components["parameters"]["Limit"];
+                /** @description `next_cursor` предыдущей страницы; клиент его не разбирает. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница сессий */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadingSessionPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
             default: components["responses"]["Error"];
         };
     };

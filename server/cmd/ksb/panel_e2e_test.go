@@ -8,8 +8,10 @@ import (
 	"net/http/cookiejar"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
+	"github.com/varrcan/koreader-sync-board/server/internal/statistics/statstest"
 )
 
 // panel — браузер панели со своим cookie jar и адресом за доверенным прокси.
@@ -234,5 +236,54 @@ func TestPanelProgressE2E(t *testing.T) {
 	ds, _ := body["devices"].([]any)
 	if code != 200 || len(ds) != 1 || ds[0].(map[string]any)["reported_device"] != "PocketBook 740" {
 		t.Fatalf("book: %d %v", code, body)
+	}
+}
+
+// TestPanelStatisticsE2E: снимок загружается из панели → итоги недели и сессии.
+func TestPanelStatisticsE2E(t *testing.T) {
+	t.Setenv("KSB_DATA_DIR", t.TempDir())
+	t.Setenv("ADMIN_USER", "admin")
+	t.Setenv("ADMIN_PASSWORD", "admin-password")
+	base, _ := startServer(t)
+
+	admin := newPanel(t, base, "198.51.100.50")
+	if code, body := admin.call("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "admin-password"}); code != 200 {
+		t.Fatalf("login: %d %v", code, body)
+	}
+	// Две сессии: пауза между ними больше 10 минут.
+	start := time.Now().Add(-3 * time.Hour).Unix()
+	data := statstest.Build(t, []statstest.Book{{ID: 1, Title: "Пикник на обочине", Authors: "Стругацкие",
+		MD5: "0123456789abcdef0123456789abcdef", Pages: 200, Records: []statstest.Record{
+			{Page: 1, StartTime: start, Duration: 90, TotalPages: 200},
+			{Page: 2, StartTime: start + 100, Duration: 90, TotalPages: 200},
+			{Page: 3, StartTime: start + 3600, Duration: 90, TotalPages: 200},
+		}}})
+	req, _ := http.NewRequest("POST", base+"/api/v1/statistics/import", bytes.NewReader(data))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("X-Forwarded-For", admin.ip)
+	res, err := admin.c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("import: %d", res.StatusCode)
+	}
+
+	code, body := admin.call("GET", "/api/v1/statistics/summary?period=week&tz=Europe/Moscow", nil)
+	if code != 200 {
+		t.Fatalf("summary: %d %v", code, body)
+	}
+	tot := body["totals"].(map[string]any)
+	books, _ := body["books"].([]any)
+	if tot["duration"] != 270.0 || tot["pages"] != 3.0 || tot["sessions"] != 2.0 || len(books) != 1 ||
+		books[0].(map[string]any)["title"] != "Пикник на обочине" || body["as_of"] == nil {
+		t.Fatalf("summary %v", body)
+	}
+	code, body = admin.call("GET", "/api/v1/statistics/sessions", nil)
+	items, _ := body["items"].([]any)
+	if code != 200 || len(items) != 2 || items[0].(map[string]any)["duration"] != 90.0 || items[1].(map[string]any)["pages"] != 2.0 {
+		t.Fatalf("sessions: %d %v", code, body)
 	}
 }

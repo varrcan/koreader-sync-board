@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/oapi-codegen/runtime"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // Defines values for BookFilter.
@@ -68,6 +69,27 @@ func (e Role) Valid() bool {
 	}
 }
 
+// Defines values for StatisticsPeriod.
+const (
+	StatisticsPeriodMonth StatisticsPeriod = "month"
+	StatisticsPeriodWeek  StatisticsPeriod = "week"
+	StatisticsPeriodYear  StatisticsPeriod = "year"
+)
+
+// Valid indicates whether the value is a known member of the StatisticsPeriod enum.
+func (e StatisticsPeriod) Valid() bool {
+	switch e {
+	case StatisticsPeriodMonth:
+		return true
+	case StatisticsPeriodWeek:
+		return true
+	case StatisticsPeriodYear:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for StatisticsSource.
 const (
 	Import StatisticsSource = "import"
@@ -80,6 +102,24 @@ func (e StatisticsSource) Valid() bool {
 	case Import:
 		return true
 	case Webdav:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for StatisticsSummaryBucket.
+const (
+	StatisticsSummaryBucketDay   StatisticsSummaryBucket = "day"
+	StatisticsSummaryBucketMonth StatisticsSummaryBucket = "month"
+)
+
+// Valid indicates whether the value is a known member of the StatisticsSummaryBucket enum.
+func (e StatisticsSummaryBucket) Valid() bool {
+	switch e {
+	case StatisticsSummaryBucketDay:
+		return true
+	case StatisticsSummaryBucketMonth:
 		return true
 	default:
 		return false
@@ -261,6 +301,27 @@ type Me struct {
 	Username string `json:"username"`
 }
 
+// ReadingSession defines model for ReadingSession.
+type ReadingSession struct {
+	Book StatisticsBookRef `json:"book"`
+
+	// Duration Сумма длительностей записей, секунды.
+	Duration int64 `json:"duration"`
+
+	// EndedAt Наибольший конец записи сессии.
+	EndedAt time.Time `json:"ended_at"`
+
+	// Pages Различные страницы сессии.
+	Pages     int       `json:"pages"`
+	StartedAt time.Time `json:"started_at"`
+}
+
+// ReadingSessionPage defines model for ReadingSessionPage.
+type ReadingSessionPage struct {
+	Items      []ReadingSession `json:"items"`
+	NextCursor *string          `json:"next_cursor"`
+}
+
 // RenameDeviceRequest defines model for RenameDeviceRequest.
 type RenameDeviceRequest struct {
 	// Name Пробелы по краям обрезаются; после обрезки 1–64 символа.
@@ -286,6 +347,71 @@ type SetupRequest struct {
 type SetupStatus struct {
 	Required bool `json:"required"`
 }
+
+// StatisticsBook defines model for StatisticsBook.
+type StatisticsBook struct {
+	Authors  *string `json:"authors"`
+	Duration int64   `json:"duration"`
+
+	// HasProgress Есть ли у пользователя прогресс по этому хешу (карточка книги).
+	HasProgress bool `json:"has_progress"`
+
+	// Hash `null` у книги статистики без хеша.
+	Hash  *string `json:"hash"`
+	Pages int     `json:"pages"`
+
+	// Title Из `metadata` синхронизаций прогресса пользователя по тому же хешу, а если её
+	// нет — из статистики чтения.
+	Title *string `json:"title"`
+}
+
+// StatisticsBookRef defines model for StatisticsBookRef.
+type StatisticsBookRef struct {
+	Authors *string `json:"authors"`
+
+	// HasProgress Есть ли у пользователя прогресс по этому хешу (карточка книги).
+	HasProgress bool `json:"has_progress"`
+
+	// Hash `null` у книги статистики без хеша.
+	Hash *string `json:"hash"`
+
+	// Title Из `metadata` синхронизаций прогресса пользователя по тому же хешу, а если её
+	// нет — из статистики чтения.
+	Title *string `json:"title"`
+}
+
+// StatisticsBucket defines model for StatisticsBucket.
+type StatisticsBucket struct {
+	// Date День или первый день месяца.
+	Date     openapi_types.Date `json:"date"`
+	Duration int64              `json:"duration"`
+
+	// NoData День позже дня `as_of` (месяц — если все его дни такие): данных за него у
+	// сервера ещё нет, это не день без чтения.
+	NoData bool `json:"no_data"`
+	Pages  int  `json:"pages"`
+}
+
+// StatisticsCalendar defines model for StatisticsCalendar.
+type StatisticsCalendar struct {
+	AsOf *time.Time `json:"as_of"`
+
+	// Days Только дни с чтением, по возрастанию даты.
+	Days []StatisticsDay `json:"days"`
+
+	// From Понедельник.
+	From openapi_types.Date `json:"from"`
+	To   openapi_types.Date `json:"to"`
+}
+
+// StatisticsDay defines model for StatisticsDay.
+type StatisticsDay struct {
+	Date     openapi_types.Date `json:"date"`
+	Duration int64              `json:"duration"`
+}
+
+// StatisticsPeriod defines model for StatisticsPeriod.
+type StatisticsPeriod string
 
 // StatisticsSnapshot defines model for StatisticsSnapshot.
 type StatisticsSnapshot struct {
@@ -319,6 +445,47 @@ type StatisticsState struct {
 	Snapshot *StatisticsSnapshot `json:"snapshot"`
 }
 
+// StatisticsSummary defines model for StatisticsSummary.
+type StatisticsSummary struct {
+	// AsOf Время приёма снимка; `null`, если статистики нет.
+	AsOf *time.Time `json:"as_of"`
+
+	// Books До 10 книг с наибольшим временем в периоде.
+	Books  []StatisticsBook        `json:"books"`
+	Bucket StatisticsSummaryBucket `json:"bucket"`
+	From   openapi_types.Date      `json:"from"`
+
+	// Hours 24 значения — время чтения за период по часу начала записи, секунды.
+	Hours    []int64          `json:"hours"`
+	Period   StatisticsPeriod `json:"period"`
+	Previous StatisticsTotals `json:"previous"`
+
+	// Series По элементу на каждый день периода (для `year` — на каждый месяц).
+	Series []StatisticsBucket `json:"series"`
+
+	// To Сегодня в поясе `tz`.
+	To     openapi_types.Date `json:"to"`
+	Totals StatisticsTotals   `json:"totals"`
+}
+
+// StatisticsSummaryBucket defines model for StatisticsSummary.Bucket.
+type StatisticsSummaryBucket string
+
+// StatisticsTotals defines model for StatisticsTotals.
+type StatisticsTotals struct {
+	// Days Дни с чтением.
+	Days int `json:"days"`
+
+	// Duration Время чтения, секунды.
+	Duration int64 `json:"duration"`
+
+	// Pages Сумма различных страниц по дням.
+	Pages int `json:"pages"`
+
+	// Sessions Сессии, начатые в периоде.
+	Sessions int `json:"sessions"`
+}
+
 // UserSummary defines model for UserSummary.
 type UserSummary struct {
 	Disabled bool   `json:"disabled"`
@@ -346,6 +513,9 @@ type DeviceID = int64
 
 // Limit defines model for Limit.
 type Limit = int
+
+// TimeZone Example: Europe/Moscow
+type TimeZone = string
 
 // BadRequest defines model for BadRequest.
 type BadRequest = Error
@@ -396,6 +566,30 @@ type ListBooksParams struct {
 
 	// Cursor `next_cursor` предыдущей страницы; клиент его не разбирает.
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// GetStatisticsCalendarParams defines parameters for GetStatisticsCalendar.
+type GetStatisticsCalendarParams struct {
+	// Tz Часовой пояс IANA (`Europe/Moscow`, `UTC`), по которому считаются дни и часы.
+	Tz TimeZone `form:"tz" json:"tz"`
+}
+
+// ListReadingSessionsParams defines parameters for ListReadingSessions.
+type ListReadingSessionsParams struct {
+	// Limit Размер страницы.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor `next_cursor` предыдущей страницы; клиент его не разбирает.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// GetStatisticsSummaryParams defines parameters for GetStatisticsSummary.
+type GetStatisticsSummaryParams struct {
+	// Period `week` — 7 дней, `month` — 30 дней, `year` — 12 календарных месяцев.
+	Period StatisticsPeriod `form:"period" json:"period"`
+
+	// Tz Часовой пояс IANA (`Europe/Moscow`, `UTC`), по которому считаются дни и часы.
+	Tz TimeZone `form:"tz" json:"tz"`
 }
 
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
@@ -463,9 +657,18 @@ type ServerInterface interface {
 	// GetStatistics Снимок статистики чтения
 	// (GET /api/v1/statistics)
 	GetStatistics(w http.ResponseWriter, r *http.Request)
+	// GetStatisticsCalendar Календарь чтения
+	// (GET /api/v1/statistics/calendar)
+	GetStatisticsCalendar(w http.ResponseWriter, r *http.Request, params GetStatisticsCalendarParams)
 	// ImportStatistics Загрузить statistics.sqlite3
 	// (POST /api/v1/statistics/import)
 	ImportStatistics(w http.ResponseWriter, r *http.Request)
+	// ListReadingSessions Сессии чтения
+	// (GET /api/v1/statistics/sessions)
+	ListReadingSessions(w http.ResponseWriter, r *http.Request, params ListReadingSessionsParams)
+	// GetStatisticsSummary Итоги статистики за период
+	// (GET /api/v1/statistics/summary)
+	GetStatisticsSummary(w http.ResponseWriter, r *http.Request, params GetStatisticsSummaryParams)
 	// ListUsers Пользователи
 	// (GET /api/v1/users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -845,11 +1048,136 @@ func (siw *ServerInterfaceWrapper) GetStatistics(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// GetStatisticsCalendar operation middleware
+func (siw *ServerInterfaceWrapper) GetStatisticsCalendar(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetStatisticsCalendarParams
+
+	// ------------- Required query parameter "tz" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "tz", r.URL.Query(), &params.Tz, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tz"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tz", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetStatisticsCalendar(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ImportStatistics operation middleware
 func (siw *ServerInterfaceWrapper) ImportStatistics(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ImportStatistics(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListReadingSessions operation middleware
+func (siw *ServerInterfaceWrapper) ListReadingSessions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListReadingSessionsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListReadingSessions(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetStatisticsSummary operation middleware
+func (siw *ServerInterfaceWrapper) GetStatisticsSummary(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetStatisticsSummaryParams
+
+	// ------------- Required query parameter "period" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "period", r.URL.Query(), &params.Period, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "period"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "period", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "tz" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "tz", r.URL.Query(), &params.Tz, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tz"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tz", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetStatisticsSummary(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1026,6 +1354,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/activity", wrapper.ListActivity)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/statistics", wrapper.GetStatistics)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/statistics/import", wrapper.ImportStatistics)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/statistics/summary", wrapper.GetStatisticsSummary)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/statistics/calendar", wrapper.GetStatisticsCalendar)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/statistics/sessions", wrapper.ListReadingSessions)
 
 	return m
 }

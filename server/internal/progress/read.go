@@ -219,6 +219,30 @@ func (s *Store) Book(ctx context.Context, userID int64, hash string) (Book, []De
 	return b, devices, rows.Err()
 }
 
+// Today возвращает изменение процента книги с начала дня since: от последней
+// синхронизации, полученной до since, а если её нет — от первой после since, до
+// последней. Устройства не различаются, время — серверное. Чужая и несуществующая
+// книга — ErrNoProgress.
+func (s *Store) Today(ctx context.Context, userID int64, hash string, since time.Time) (float64, error) {
+	var d float64
+	err := s.db.Read.QueryRowContext(ctx, `
+		SELECT cur.percentage - coalesce(
+			(SELECT e.percentage FROM progress_events e
+			 WHERE e.user_id = c.user_id AND e.document_id = c.document_id AND e.server_ts < ?3
+			 ORDER BY e.id DESC LIMIT 1),
+			(SELECT e.percentage FROM progress_events e
+			 WHERE e.user_id = c.user_id AND e.document_id = c.document_id AND e.server_ts >= ?3
+			 ORDER BY e.id LIMIT 1))
+		FROM progress_current c
+		JOIN documents d ON d.id = c.document_id
+		JOIN progress_events cur ON cur.id = c.event_id
+		WHERE c.user_id = ?1 AND d.hash = ?2`, userID, hash, since.Unix()).Scan(&d)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNoProgress
+	}
+	return d, err
+}
+
 // Activity возвращает ленту пользователя, свёрнутую в группы, от последней
 // синхронизации к более ранним; hash ограничивает ленту одной книгой (книги нет
 // у пользователя — ErrNoProgress). before — курсор (0 — с начала).

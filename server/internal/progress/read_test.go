@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/netip"
 	"path/filepath"
 	"strings"
@@ -402,5 +403,57 @@ func TestTitleFromStatistics(t *testing.T) {
 	a := e.activity(alice, "stat", 0, 10)
 	if len(a.Items) != 1 || str(a.Items[0].Title) != "Stat title" || str(a.Items[0].Authors) != "Stat author" {
 		t.Fatalf("activity: %+v", a.Items)
+	}
+}
+
+func TestToday(t *testing.T) {
+	e := newReadEnv(t)
+	e.user("alice")
+	e.user("bob")
+	alice := e.device("alice", "Kobo")
+	pb := e.device("alice", "PocketBook")
+	bob := e.device("bob", "Kindle")
+	at := func(y int, m time.Month, d, h, min int) {
+		e.now = time.Date(y, m, d, h, min, 0, 0, time.UTC)
+	}
+	midnight := time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)
+	today := func(user int64, hash string, since time.Time, want float64) {
+		t.Helper()
+		got, err := e.s.Today(e.ctx, user, hash, since)
+		if err != nil || math.Abs(got-want) > 1e-9 {
+			t.Errorf("%s since %v: %v, %v; want %v", hash, since, got, err, want)
+		}
+	}
+
+	at(2026, 11, 4, 20, 0)
+	e.sync(alice, "evening", 0.583, 0, Metadata{})
+	e.sync(alice, "yesterday", 0.3, 0, Metadata{})
+	at(2026, 11, 5, 8, 0)
+	// Устройства не различаются: база — последняя синхронизация до полуночи с любого.
+	e.sync(pb, "evening", 0.601, 0, Metadata{})
+	e.sync(alice, "evening", 0.624, 2*time.Hour, Metadata{})
+	e.sync(alice, "started", 0.05, 0, Metadata{})
+	e.sync(alice, "started", 0.12, time.Hour, Metadata{})
+
+	userID := alice.UserID
+	today(userID, "evening", midnight, 0.041)
+	today(userID, "yesterday", midnight, 0)
+	today(userID, "started", midnight, 0.07)
+
+	// 21:30 UTC 3 ноября — уже 4 ноября в Москве.
+	at(2026, 11, 3, 20, 0)
+	e.sync(alice, "moscow", 0.10, 0, Metadata{})
+	at(2026, 11, 3, 21, 30)
+	e.sync(alice, "moscow", 0.15, 0, Metadata{})
+	msk, err := time.LoadLocation("Europe/Moscow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	today(userID, "moscow", time.Date(2026, 11, 4, 0, 0, 0, 0, msk), 0.05)
+	today(userID, "moscow", time.Date(2026, 11, 4, 0, 0, 0, 0, time.UTC), 0)
+
+	e.sync(bob, "bobs", 0.5, 0, Metadata{})
+	if _, err := e.s.Today(e.ctx, userID, "bobs", midnight); !errors.Is(err, ErrNoProgress) {
+		t.Fatalf("foreign book: %v", err)
 	}
 }

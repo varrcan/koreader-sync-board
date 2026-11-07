@@ -82,7 +82,7 @@ func (e *env) summary(userID int64, p Period, tz string, at time.Time) Summary {
 
 func (e *env) allSessions(userID int64) []Session {
 	e.t.Helper()
-	out, next, err := e.s.Sessions(ctx, userID, nil, 1000)
+	out, next, err := e.s.Sessions(ctx, userID, nil, nil, 1000)
 	if err != nil || next != nil {
 		e.t.Fatalf("sessions: next %v, %v", next, err)
 	}
@@ -464,7 +464,7 @@ func TestSessionsPaging(t *testing.T) {
 		var got []Session
 		var after *SessionCursor
 		for range 10 {
-			page, next, err := e.s.Sessions(ctx, alice, after, limit)
+			page, next, err := e.s.Sessions(ctx, alice, nil, after, limit)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -505,7 +505,10 @@ func TestParseSessionCursor(t *testing.T) {
 // TestOracleDays сверяет дни с KOReader на настоящем statistics.sqlite3 (путь — в
 // KSB_ORACLE_STATS): страницы по дням — с getDaysFromPeriod по вьюхе page_stat
 // (в UTC, без 'localtime'), время — с суммой сырых duration.
-func TestOracleDays(t *testing.T) {
+// oracle открывает копию statistics.sqlite3 из KSB_ORACLE_STATS со вьюхой page_stat
+// из statstest.Schema и возвращает базу и путь к копии.
+func oracle(t *testing.T) (*sql.DB, string) {
+	t.Helper()
 	path := os.Getenv("KSB_ORACLE_STATS")
 	if path == "" {
 		t.Skip("KSB_ORACLE_STATS not set")
@@ -528,12 +531,17 @@ func TestOracleDays(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer kodb.Close()
+	t.Cleanup(func() { kodb.Close() })
 	for _, q := range []string{`DROP VIEW IF EXISTS page_stat`, `DROP TABLE IF EXISTS numbers`, statstest.Schema} {
 		if _, err := kodb.ExecContext(ctx, q); err != nil {
 			t.Fatal(err)
 		}
 	}
+	return kodb, copyPath
+}
+
+func TestOracleDays(t *testing.T) {
+	kodb, copyPath := oracle(t)
 	type dayStat struct {
 		pages           int
 		viewDur, rawDur int64
@@ -637,4 +645,263 @@ func TestOracleDays(t *testing.T) {
 		loss += k.rawDur - k.viewDur
 	}
 	t.Logf("%d days match, page_stat loses %d s", len(ko), loss)
+}
+
+func (e *env) book(userID int64, hash string, percentage float64, tz string) (*time.Time, *BookStats) {
+	e.t.Helper()
+	asOf, st, err := e.s.Book(ctx, userID, hash, percentage, mustLoc(e.t, tz))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return asOf, st
+}
+
+func TestBook(t *testing.T) {
+	e := newEnv(t)
+	// 3 ноября 21:30 UTC — уже 4-е в Москве.
+	late, day := unix(2026, 11, 3, 21, 30), unix(2026, 11, 4, 10, 0)
+	alice := e.snapshot("alice", now, []statstest.Book{
+		statBook(1, "A", "aaa", 100, pageRec(10, 100, late, 2400), pageRec(10, 100, day, 600), pageRec(11, 100, day+600, 600)),
+		statBook(2, "B", "bbb", 100, pageRec(1, 100, day+3000, 60)),
+	})
+	asOf, st := e.book(alice, "aaa", 0.5, "UTC")
+	if asOf == nil || !asOf.Equal(now) || st == nil {
+		t.Fatalf("as_of %v, stats %+v", asOf, st)
+	}
+	if st.Duration != 3600 || st.Days != 2 || st.PagesRead != 2 || st.Sessions != 2 {
+		t.Fatalf("stats %+v", st)
+	}
+	if !st.FirstReadAt.Equal(time.Unix(late, 0)) || !st.LastReadAt.Equal(time.Unix(day+1200, 0)) {
+		t.Fatalf("first %v, last %v", st.FirstReadAt, st.LastReadAt)
+	}
+	if _, st := e.book(alice, "aaa", 0.5, "Europe/Moscow"); st.Days != 1 {
+		t.Fatalf("Moscow days %d", st.Days)
+	}
+}
+
+func TestBookPageTime(t *testing.T) {
+	e := newEnv(t)
+	day := unix(2026, 11, 4, 8, 0)
+	alice := e.snapshot("alice", now, []statstest.Book{
+		// Страница 1 — 300 с за две записи, ограничивается 120; страница 2 — 60.
+		statBook(1, "Capped", "aaa", 2, pageRec(1, 2, day, 200), pageRec(2, 2, day+200, 60), pageRec(1, 2, day+260, 100)),
+		// Запись другой разметки делится между страницами 9 и 10 нацело, как во вьюхе.
+		statBook(2, "Split", "bbb", 200, pageRec(5, 100, day+1000, 61)),
+	})
+	_, st := e.book(alice, "aaa", 0.5, "UTC")
+	if st.Duration != 360 || st.PageTime == nil || *st.PageTime != 90 {
+		t.Fatalf("capped: %+v", st)
+	}
+	_, st = e.book(alice, "bbb", 0.5, "UTC")
+	if st.Duration != 61 || st.PagesRead != 2 || st.PageTime == nil || *st.PageTime != 30 {
+		t.Fatalf("split: %+v", st)
+	}
+}
+
+func TestBookPages(t *testing.T) {
+	e := newEnv(t)
+	day := unix(2026, 11, 4, 8, 0)
+	row := func(id int64, title, md5 string, pages, lastOpen int64, recs ...statstest.Record) statstest.Book {
+		b := statBook(id, title, md5, pages, recs...)
+		b.LastOpen = lastOpen
+		return b
+	}
+	yesterday, today := unix(2026, 11, 3, 8, 0), unix(2026, 11, 4, 8, 0)
+	alice := e.snapshot("alice", now, []statstest.Book{
+		row(1, "H old", "hhh", 300, yesterday, pageRec(1, 300, day, 60)),
+		row(2, "H new", "hhh", 320, today, pageRec(2, 320, day+60, 60)),
+		row(3, "Z zero", "zzz", 0, today, pageRec(1, 100, day+200, 60)),
+		row(4, "Z old", "zzz", 300, yesterday, pageRec(1, 300, day+300, 60)),
+		row(5, "N zero", "nnn", 0, today, pageRec(1, 100, day+400, 60)),
+		row(6, "N null", "nnn", 300, yesterday, pageRec(1, 300, day+500, 60)),
+	}, `UPDATE book SET pages = NULL WHERE id = 6`)
+	if _, st := e.book(alice, "hhh", 0.5, "UTC"); st.Pages == nil || *st.Pages != 320 || st.Duration != 120 || st.PagesRead != 2 {
+		t.Fatalf("hhh: %+v", st)
+	}
+	if _, st := e.book(alice, "zzz", 0.5, "UTC"); st.Pages == nil || *st.Pages != 300 {
+		t.Fatalf("zzz: %+v", st)
+	}
+	_, st := e.book(alice, "nnn", 0.5, "UTC")
+	if st.Pages != nil || st.CurrentPage != nil || st.TimeLeft != nil || st.Duration != 60 || st.PageTime == nil {
+		t.Fatalf("nnn: %+v", st)
+	}
+}
+
+func TestBookMissing(t *testing.T) {
+	e := newEnv(t)
+	bob := e.user("bob")
+	if asOf, st := e.book(bob, "aaa", 0.5, "UTC"); asOf != nil || st != nil {
+		t.Fatalf("no snapshot: %v, %+v", asOf, st)
+	}
+	alice := e.snapshot("alice", now, []statstest.Book{
+		statBook(1, "A", "aaa", 100, pageRec(1, 0, unix(2026, 11, 4, 8, 0), 60)),
+		statBook(2, "B", "bbb", 100, pageRec(1, 100, unix(2026, 11, 4, 9, 0), 60)),
+	})
+	if asOf, st := e.book(alice, "ccc", 0.5, "UTC"); asOf == nil || st != nil {
+		t.Fatalf("not in snapshot: %v, %+v", asOf, st)
+	}
+	// Единственная запись отброшена (total_pages = 0): книга есть, цифры нулевые.
+	_, st := e.book(alice, "aaa", 0.5, "UTC")
+	if st == nil || st.Duration != 0 || st.PagesRead != 0 || st.Days != 0 || st.Sessions != 0 ||
+		st.FirstReadAt != nil || st.LastReadAt != nil || st.PageTime != nil || st.TimeLeft != nil ||
+		st.Pages == nil || *st.Pages != 100 || st.CurrentPage == nil || *st.CurrentPage != 50 {
+		t.Fatalf("no records: %+v", st)
+	}
+}
+
+func TestBookSessionsAmongOthers(t *testing.T) {
+	e := newEnv(t)
+	t0 := unix(2026, 11, 4, 8, 0)
+	alice := e.snapshot("alice", now, []statstest.Book{
+		statBook(1, "A", "aaa", 100, pageRec(1, 100, t0, 60), pageRec(2, 100, t0+300, 60)),
+		statBook(2, "B", "bbb", 100, pageRec(1, 100, t0+180, 60)),
+	})
+	if _, st := e.book(alice, "aaa", 0.5, "UTC"); st.Sessions != 2 {
+		t.Fatalf("sessions %d", st.Sessions)
+	}
+	// Указатели BookRef у разных загрузок разные: сравниваются границы сессий.
+	bounds := func(ss []Session) []Session {
+		out := make([]Session, len(ss))
+		for i, s := range ss {
+			out[i] = Session{StartedAt: s.StartedAt, EndedAt: s.EndedAt, Duration: s.Duration, Pages: s.Pages, key: s.key}
+		}
+		return out
+	}
+	all := bounds(e.allSessions(alice))
+	hash := "aaa"
+	got, next, err := e.s.Sessions(ctx, alice, &hash, nil, 1000)
+	got = bounds(got)
+	if err != nil || next != nil || len(got) != 2 || !slices.Equal([]Session{all[0], all[2]}, got) {
+		t.Fatalf("book sessions %+v, next %v, %v; all %+v", got, next, err, all)
+	}
+	// Подгрузка по одной: курсор общий со списком без фильтра.
+	first, after, err := e.s.Sessions(ctx, alice, &hash, nil, 1)
+	if err != nil || len(first) != 1 || after == nil {
+		t.Fatalf("first page %+v, %v, %v", first, after, err)
+	}
+	second, next, err := e.s.Sessions(ctx, alice, &hash, after, 1)
+	if err != nil || next != nil || !slices.Equal(bounds(append(first, second...)), got) {
+		t.Fatalf("second page %+v, %v, %v", second, next, err)
+	}
+	missing := "ccc"
+	if got, next, err := e.s.Sessions(ctx, alice, &missing, nil, 10); err != nil || next != nil || len(got) != 0 {
+		t.Fatalf("missing hash: %+v, %v, %v", got, next, err)
+	}
+}
+
+func TestEstimate(t *testing.T) {
+	pt := 30.0
+	for _, c := range []struct {
+		pct      float64
+		pages    int
+		page     int
+		timeLeft int64
+		finished bool
+	}{
+		{0.624, 386, 241, 145 * 30, false},
+		{0.0005, 300, 1, 299 * 30, false},
+		{0.9996, 300, 300, 0, true},
+		{0.9994, 300, 300, 0, false},
+	} {
+		st := BookStats{Pages: &c.pages, PageTime: &pt}
+		st.estimate(c.pct)
+		if st.CurrentPage == nil || *st.CurrentPage != c.page {
+			t.Errorf("%v × %d: page %v, want %d", c.pct, c.pages, st.CurrentPage, c.page)
+		}
+		switch {
+		case c.finished && st.TimeLeft != nil:
+			t.Errorf("%v: time left %d for finished book", c.pct, *st.TimeLeft)
+		case !c.finished && (st.TimeLeft == nil || *st.TimeLeft != c.timeLeft):
+			t.Errorf("%v: time left %v, want %d", c.pct, st.TimeLeft, c.timeLeft)
+		}
+	}
+}
+
+// TestOracleBooks сверяет статистику книг с экраном книги KOReader на настоящем
+// statistics.sqlite3 (KSB_ORACLE_STATS) у хешей с одной строкой book: «Pages read» —
+// count(DISTINCT page) по page_stat, «Days reading this book» — число дат (в UTC),
+// среднее на страницу — STATISTICS_SQL_BOOK_CAPPED_TOTALS_QUERY с max_sec = 120. Время
+// не меньше суммы по вьюхе: она теряет остаток деления.
+func TestOracleBooks(t *testing.T) {
+	kodb, copyPath := oracle(t)
+	type koBook struct {
+		md5             string
+		pages, days     int
+		capped, viewDur int64
+		cappedPages     int
+	}
+	var books []koBook
+	rows, err := kodb.QueryContext(ctx, `
+		SELECT b.id, b.md5 FROM book b
+		WHERE b.md5 IS NOT NULL AND (SELECT count(*) FROM book o WHERE o.md5 = b.md5) = 1`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	var md5s []string
+	for rows.Next() {
+		var id int64
+		var md5 string
+		if err := rows.Scan(&id, &md5); err != nil {
+			t.Fatal(err)
+		}
+		ids, md5s = append(ids, id), append(md5s, md5)
+	}
+	rows.Close()
+	for i, id := range ids {
+		b := koBook{md5: md5s[i]}
+		if err := kodb.QueryRowContext(ctx, `
+			SELECT count(DISTINCT page), count(DISTINCT strftime('%Y-%m-%d', start_time, 'unixepoch')),
+			       coalesce(sum(duration), 0)
+			FROM page_stat WHERE id_book = ?`, id).Scan(&b.pages, &b.days, &b.viewDur); err != nil {
+			t.Fatal(err)
+		}
+		if err := kodb.QueryRowContext(ctx, `
+			SELECT count(*), coalesce(sum(durations), 0)
+			FROM (SELECT min(sum(duration), ?) AS durations FROM page_stat WHERE id_book = ? GROUP BY page)`,
+			maxPageTime, id).Scan(&b.cappedPages, &b.capped); err != nil {
+			t.Fatal(err)
+		}
+		books = append(books, b)
+	}
+	if err := kodb.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := os.ReadFile(copyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := newEnv(t)
+	alice := e.user("alice")
+	if _, err := e.s.Import(ctx, alice, data); err != nil {
+		t.Fatal(err)
+	}
+	var loss int64
+	for _, k := range books {
+		_, st := e.book(alice, k.md5, 0.5, "UTC")
+		if st == nil {
+			t.Errorf("%s: no stats", k.md5)
+			continue
+		}
+		if st.PagesRead != k.pages || st.Days != k.days || st.Duration < k.viewDur {
+			t.Errorf("%s: ours %+v, KOReader pages %d, days %d, view time %d", k.md5, st, k.pages, k.days, k.viewDur)
+		}
+		switch {
+		case k.cappedPages == 0 && st.PageTime != nil:
+			t.Errorf("%s: page time %v without pages", k.md5, *st.PageTime)
+		case k.cappedPages > 0 && (st.PageTime == nil || *st.PageTime != float64(k.capped)/float64(k.cappedPages)):
+			t.Errorf("%s: page time %v, KOReader %d/%d", k.md5, st.PageTime, k.capped, k.cappedPages)
+		}
+		loss += st.Duration - k.viewDur
+	}
+	t.Logf("%d books match, page_stat loses %d s", len(books), loss)
+}
+
+func TestBookNegativeStart(t *testing.T) {
+	e := newEnv(t)
+	alice := e.snapshot("alice", now, []statstest.Book{statBook(1, "A", "aaa", 100, pageRec(1, 100, -500, 60))})
+	if _, st := e.book(alice, "aaa", 0.5, "UTC"); st.LastReadAt == nil || st.LastReadAt.Unix() != -440 || st.FirstReadAt.Unix() != -500 {
+		t.Fatalf("first %v, last %v", st.FirstReadAt, st.LastReadAt)
+	}
 }

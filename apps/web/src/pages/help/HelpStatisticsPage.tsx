@@ -53,6 +53,7 @@ export function HelpStatisticsPage() {
         <HelpText k="help.statistics.numbers.pages" />
         <HelpText k="help.statistics.numbers.sessions" />
         <HelpText k="help.statistics.numbers.noData" />
+        <HelpText k="help.statistics.numbers.book" />
       </HelpSection>
     </HelpPage>
   );

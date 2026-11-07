@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"testing"
@@ -265,5 +266,56 @@ func TestStatisticsAggregates(t *testing.T) {
 	}
 	if len(titles) != 3 || r.body["next_cursor"] != nil {
 		t.Fatalf("sessions %v, last %v", titles, r.body)
+	}
+}
+
+func TestBookStatisticsAPI(t *testing.T) {
+	e := newEnv(t)
+	e.admin()
+	e.browser().do("GET", "/api/v1/books/abc/statistics?tz=UTC", nil).expect(t, "no session", 401, "unauthorized")
+	alice := e.panelUser("alice", accounts.RoleUser)
+	bob := e.panelUser("bob", accounts.RoleUser)
+	hash := fmt.Sprintf("%032x", len("Alice book"))
+	path := "/api/v1/books/" + hash + "/statistics?tz=UTC"
+
+	// Вчерашняя синхронизация — база «сегодня», и по ней же прогресс без снимка.
+	r := e.reader("alice", "kobo")
+	r.sync(hash, 0.3, time.Now().Add(-48*time.Hour), "")
+	r.sync(hash, 0.5, time.Now(), "")
+	r.sync("other", 0.1, time.Now(), "")
+
+	for _, q := range []string{"", "?tz=", "?tz=Mars/Olympus"} {
+		alice.do("GET", "/api/v1/books/"+hash+"/statistics"+q, nil).expect(t, q, 400, "bad_request")
+	}
+	bob.do("GET", path, nil).expect(t, "foreign", 404, "not_found")
+
+	res := alice.do("GET", path, nil)
+	res.expect(t, "no snapshot", 200, "")
+	if v, ok := res.body["as_of"]; !ok || v != nil || res.body["stats"] != nil || math.Abs(res.body["percentage_today"].(float64)-0.2) > 1e-9 {
+		t.Fatalf("no snapshot: %v", res.body)
+	}
+
+	alice.upload(recentStats(t, "Alice book", 3)).expect(t, "import", 200, "")
+	res = alice.do("GET", path, nil)
+	res.expect(t, "stats", 200, "")
+	st, ok := res.body["stats"].(map[string]any)
+	if !ok || res.body["as_of"] == nil || st["duration"] != 180.0 || st["sessions"] != 3.0 || st["pages_read"] != 3.0 ||
+		st["pages"] != 10.0 || st["current_page"] != 5.0 || st["page_time"] != 60.0 || st["time_left"] != 300.0 {
+		t.Fatalf("stats %v", res.body)
+	}
+
+	// Снимок есть, книги в нём нет.
+	res = alice.do("GET", "/api/v1/books/other/statistics?tz=UTC", nil)
+	res.expect(t, "not in snapshot", 200, "")
+	if res.body["as_of"] == nil || res.body["stats"] != nil {
+		t.Fatalf("not in snapshot: %v", res.body)
+	}
+
+	for doc, want := range map[string]int{hash: 3, "other": 0} {
+		res = alice.do("GET", "/api/v1/statistics/sessions?document="+doc, nil)
+		res.expect(t, doc, 200, "")
+		if items := res.body["items"].([]any); len(items) != want || res.body["next_cursor"] != nil {
+			t.Fatalf("sessions of %s: %v", doc, res.body)
+		}
 	}
 }

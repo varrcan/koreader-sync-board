@@ -36,6 +36,8 @@ export type StatisticsDay = Schemas["StatisticsDay"];
 export type StatisticsCalendar = Schemas["StatisticsCalendar"];
 export type ReadingSession = Schemas["ReadingSession"];
 export type ReadingSessionPage = Schemas["ReadingSessionPage"];
+export type BookReadingStats = Schemas["BookReadingStats"];
+export type BookStatistics = Schemas["BookStatistics"];
 
 export type ApiClient = ReturnType<typeof createApiClient>;
 

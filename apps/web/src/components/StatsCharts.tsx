@@ -17,9 +17,14 @@ function localDay(d: Date): number {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 }
 
-/** Снимок старше сегодняшнего дня (to — «сегодня» в поясе запроса). */
-export function isStale(asOf: string | null, to: string): boolean {
-  return asOf !== null && localDay(new Date(asOf)) < parseDate(to).getTime();
+/**
+ * Снимок старше сегодняшнего дня. today — «сегодня» из ответа (YYYY-MM-DD в поясе запроса)
+ * или момент на клиенте для ответов без даты: пояс запроса — пояс браузера, поэтому
+ * локальная дата клиента — тот же день.
+ */
+export function isStale(asOf: string | null, today: string | number): boolean {
+  const day = typeof today === "string" ? parseDate(today).getTime() : localDay(new Date(today));
+  return asOf !== null && localDay(new Date(asOf)) < day;
 }
 
 /** Отметка «статистика на 2 ноября» у заголовка блока. */
@@ -84,12 +89,12 @@ export function ChangeText({ change, className }: { change: Change; className?: 
   );
 }
 
-export function StatTile({ label, value, change }: { label: string; value: ReactNode; change: Change }) {
+export function StatTile({ label, value, change }: { label: string; value: ReactNode; change?: Change }) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5 rounded-xl border bg-card p-4">
       <div className="text-[13px] text-muted-foreground">{label}</div>
       <div className="text-[clamp(22px,6vw,28px)] leading-8 font-semibold tracking-[-0.01em] tabular-nums">{value}</div>
-      <ChangeText change={change} />
+      {change && <ChangeText change={change} />}
     </div>
   );
 }

@@ -39,3 +39,12 @@ export function parseDate(date: string): Date {
   const [y = 0, m = 1, d = 1] = date.split("-").map(Number);
   return new Date(y, m - 1, d);
 }
+
+/** Короткий интервал с секундами: «45 с», «1 мин 30 с» — для среднего времени на страницу. */
+export function formatSeconds(seconds: number, lang: string): string {
+  const unit = (u: "minute" | "second", n: number) =>
+    new Intl.NumberFormat(lang, { style: "unit", unit: u, unitDisplay: "short" }).format(n);
+  const s = Math.round(seconds);
+  if (s < 60) return unit("second", s);
+  return s % 60 === 0 ? unit("minute", s / 60) : `${unit("minute", Math.floor(s / 60))} ${unit("second", s % 60)}`;
+}

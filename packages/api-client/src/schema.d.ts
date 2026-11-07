@@ -286,6 +286,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/books/{hash}/statistics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Хеш документа, как его прислала читалка. */
+                hash: components["parameters"]["BookHash"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Статистика книги
+         * @description Статистика чтения книги из снимка владельца сессии (в том числе администратора —
+         *     только своя) и изменение процента за сегодня по журналу прогресса. Книга без
+         *     прогресса — 404, как карточка книги. Цифры считаются по тем же правилам, что итоги
+         *     `/statistics/summary`; дни — по часовому поясу `tz`.
+         */
+        get: operations["getBookStatistics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/activity": {
         parameters: {
             query?: never;
@@ -751,6 +777,59 @@ export interface components {
         ReadingSessionPage: {
             items: components["schemas"]["ReadingSession"][];
             next_cursor: string | null;
+        };
+        BookReadingStats: {
+            /**
+             * Format: int64
+             * @description Время чтения книги, секунды.
+             */
+            duration: number;
+            /** @description Различные страницы книги за всё время, в текущей разметке. */
+            pages_read: number;
+            /** @description Дни с чтением книги. */
+            days: number;
+            sessions: number;
+            /**
+             * Format: date-time
+             * @description Начало самой ранней записи; `null`, если записей нет.
+             */
+            first_read_at: string | null;
+            /**
+             * Format: date-time
+             * @description Наибольший конец записи.
+             */
+            last_read_at: string | null;
+            /**
+             * Format: double
+             * @description Среднее время на страницу, секунды, как в KOReader: время каждой страницы
+             *     ограничивается 120 секундами. `null`, если записей нет.
+             */
+            page_time: number | null;
+            /** @description Число страниц книги из самой поздно открытой строки статистики с известным числом страниц. */
+            pages: number | null;
+            /** @description Процент последней синхронизации прогресса, переведённый в страницы (1 — `pages`). */
+            current_page: number | null;
+            /**
+             * Format: int64
+             * @description Оценка времени до конца, секунды: оставшиеся страницы × `page_time`. `null`,
+             *     если страница или среднее неизвестны или книга прочитана.
+             */
+            time_left: number | null;
+        };
+        BookStatistics: {
+            /**
+             * Format: date-time
+             * @description Время приёма снимка; `null`, если статистики нет.
+             */
+            as_of: string | null;
+            /**
+             * Format: double
+             * @description Изменение процента за сегодня в поясе `tz`: от последней синхронизации до начала
+             *     дня (или первой сегодняшней) до последней. Может быть нулевым и отрицательным.
+             */
+            percentage_today: number;
+            /** @description `null`, если в снимке нет книги с этим хешем. */
+            stats: components["schemas"]["BookReadingStats"] | null;
         };
     };
     responses: {
@@ -1348,6 +1427,36 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getBookStatistics: {
+        parameters: {
+            query: {
+                /** @description Часовой пояс IANA (`Europe/Moscow`, `UTC`), по которому считаются дни и часы. */
+                tz: components["parameters"]["TimeZone"];
+            };
+            header?: never;
+            path: {
+                /** @description Хеш документа, как его прислала читалка. */
+                hash: components["parameters"]["BookHash"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Статистика книги */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BookStatistics"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["BookNotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
     listActivity: {
         parameters: {
             query?: {
@@ -1512,6 +1621,12 @@ export interface operations {
     listReadingSessions: {
         parameters: {
             query?: {
+                /**
+                 * @description Хеш документа — сессии одной книги. Сессии строятся по всем записям
+                 *     пользователя, поэтому их границы те же, что без фильтра. Хеша нет в снимке —
+                 *     пустой список.
+                 */
+                document?: string;
                 /** @description Размер страницы. */
                 limit?: components["parameters"]["Limit"];
                 /** @description `next_cursor` предыдущей страницы; клиент его не разбирает. */

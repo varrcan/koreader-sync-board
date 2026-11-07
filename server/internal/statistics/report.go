@@ -6,10 +6,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 )
 
 // SessionGap — наибольшая пауза внутри сессии: от начала записи до наибольшего
@@ -24,6 +27,12 @@ const maxPagesPerRecord = 1000
 
 // topBooks — сколько книг в топе периода.
 const topBooks = 10
+
+// maxPageTime — предел времени одной страницы в среднем на страницу:
+// DEFAULT_MAX_READ_SEC KOReader (statistics.koplugin/main.lua). Настройка max_sec
+// живёт в settings.reader.lua читалки, а не в statistics.sqlite3, поэтому серверу
+// известно только умолчание.
+const maxPageTime = 120
 
 // Period — период итогов.
 type Period string
@@ -152,6 +161,7 @@ type record struct {
 type report struct {
 	asOf    *time.Time
 	books   map[int64]BookRef
+	pages   map[int64]int
 	records []record
 }
 
@@ -167,7 +177,7 @@ func (s *Store) load(ctx context.Context, userID int64) (*report, error) {
 	}
 	defer tx.Rollback()
 
-	rep := &report{books: map[int64]BookRef{}}
+	rep := &report{books: map[int64]BookRef{}, pages: map[int64]int{}}
 	var asOf int64
 	err = tx.QueryRowContext(ctx, `SELECT modified_at FROM webdav_files WHERE user_id = ? AND name = ?`,
 		userID, FileStatistics).Scan(&asOf)
@@ -181,11 +191,17 @@ func (s *Store) load(ctx context.Context, userID int64) (*report, error) {
 	}
 
 	// Название — как в списке книг (statBook в progress/read.go): из прогресса, иначе
-	// из строки хеша с непустым названием и самым поздним last_open.
+	// из строки хеша с непустым названием и самым поздним last_open. Число страниц —
+	// из строки хеша с самым поздним last_open среди строк с известным числом: при
+	// слиянии last_open строки обновляется из входящего снимка, а pages — нет.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT b.id, b.document_id, d.hash,
 		       coalesce(c.meta_title, nullif(st.title, '')), coalesce(c.meta_authors, st.authors),
-		       c.user_id IS NOT NULL
+		       c.user_id IS NOT NULL,
+		       CASE WHEN b.document_id IS NULL THEN nullif(b.pages, 0) ELSE (
+		           SELECT s.pages FROM stat_books s
+		           WHERE s.user_id = b.user_id AND s.document_id = b.document_id AND s.pages > 0
+		           ORDER BY s.last_open DESC, s.id DESC LIMIT 1) END
 		FROM stat_books b
 		LEFT JOIN documents d ON d.id = b.document_id
 		LEFT JOIN progress_current c ON c.user_id = b.user_id AND c.document_id = b.document_id
@@ -203,8 +219,9 @@ func (s *Store) load(ctx context.Context, userID int64) (*report, error) {
 		var id int64
 		var doc sql.NullInt64
 		var hash, title, authors sql.NullString
+		var pages sql.NullInt64
 		var ref BookRef
-		if err := rows.Scan(&id, &doc, &hash, &title, &authors, &ref.HasProgress); err != nil {
+		if err := rows.Scan(&id, &doc, &hash, &title, &authors, &ref.HasProgress, &pages); err != nil {
 			return nil, err
 		}
 		key := -id
@@ -214,6 +231,9 @@ func (s *Store) load(ctx context.Context, userID int64) (*report, error) {
 		keys[id] = key
 		ref.Title, ref.Authors, ref.Hash = optString(title), optString(authors), optString(hash)
 		rep.books[key] = ref
+		if pages.Valid {
+			rep.pages[key] = int(pages.Int64)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -479,18 +499,26 @@ func (s *Store) Calendar(ctx context.Context, userID int64, loc *time.Location, 
 }
 
 // Sessions возвращает до limit сессий после курсора (nil — с начала) от последней к
-// более ранним и курсор следующей страницы (nil на последней). Сессии строятся заново по всем
-// записям, поэтому разбиение на страницы не меняет их границ.
-func (s *Store) Sessions(ctx context.Context, userID int64, after *SessionCursor, limit int) ([]Session, *SessionCursor, error) {
+// более ранним и курсор следующей страницы (nil на последней); document — только
+// сессии книги с этим хешем. Сессии строятся заново по всем записям, поэтому ни
+// разбиение на страницы, ни фильтр по книге не меняют их границ.
+func (s *Store) Sessions(ctx context.Context, userID int64, document *string, after *SessionCursor, limit int) ([]Session, *SessionCursor, error) {
 	rep, err := s.load(ctx, userID)
 	if err != nil {
 		return nil, nil, err
+	}
+	var key int64
+	if document != nil {
+		var ok bool
+		if key, ok = rep.key(*document); !ok {
+			return []Session{}, nil, nil
+		}
 	}
 	all := rep.sessions()
 	out := []Session{}
 	for i := len(all) - 1; i >= 0; i-- {
 		ses := &all[i]
-		if !after.before(ses) {
+		if document != nil && ses.key != key || !after.before(ses) {
 			continue
 		}
 		if len(out) == limit {
@@ -500,4 +528,101 @@ func (s *Store) Sessions(ctx context.Context, userID int64, after *SessionCursor
 		out = append(out, *ses)
 	}
 	return out, nil, nil
+}
+
+// key — ключ книги с хешем hash: у книги с хешем это document_id, все строки хеша
+// уже сведены к нему.
+func (rep *report) key(hash string) (int64, bool) {
+	for k, ref := range rep.books {
+		if ref.Hash != nil && *ref.Hash == hash {
+			return k, true
+		}
+	}
+	return 0, false
+}
+
+// BookStats — статистика одной книги за всё время. Указатели — nil, когда величина
+// неизвестна: нет записей, числа страниц или процента прочитанной книги.
+type BookStats struct {
+	Duration                  int64
+	PagesRead, Days, Sessions int
+	FirstReadAt, LastReadAt   *time.Time
+	PageTime                  *float64
+	Pages, CurrentPage        *int
+	TimeLeft                  *int64
+}
+
+// Book возвращает время приёма снимка и статистику книги с хешем hash (nil, если в
+// снимке нет её строк); percentage — процент последней синхронизации прогресса, по
+// нему оцениваются текущая страница и время до конца.
+func (s *Store) Book(ctx context.Context, userID int64, hash string, percentage float64, loc *time.Location) (*time.Time, *BookStats, error) {
+	rep, err := s.load(ctx, userID)
+	if err != nil {
+		return nil, nil, err
+	}
+	key, ok := rep.key(hash)
+	if !ok {
+		return rep.asOf, nil, nil
+	}
+	st := &BookStats{}
+	if p, ok := rep.pages[key]; ok {
+		st.Pages = &p
+	}
+	days := map[time.Time]struct{}{}
+	// Время страницы — как вьюха page_stat: запись делит duration поровну между
+	// своими пересчитанными страницами нацело.
+	perPage := map[int64]int64{}
+	var first, last int64
+	for _, r := range rep.records {
+		if r.key != key {
+			continue
+		}
+		// Начало записи бывает отрицательным (сбитые часы читалки), поэтому first и
+		// last берутся с первой записи, а не с нуля.
+		if len(days) == 0 {
+			first, last = r.start, r.start+r.duration
+		}
+		st.Duration += r.duration
+		last = max(last, r.start+r.duration)
+		days[date(time.Unix(r.start, 0), loc)] = struct{}{}
+		share := r.duration / (r.last - r.first + 1)
+		for p := r.first; p <= r.last; p++ {
+			perPage[p] += share
+		}
+	}
+	if len(days) > 0 {
+		f, l := time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
+		st.FirstReadAt, st.LastReadAt = &f, &l
+		// avg_time KOReader: STATISTICS_SQL_BOOK_CAPPED_TOTALS_QUERY.
+		var capped int64
+		for _, v := range perPage {
+			capped += min(v, maxPageTime)
+		}
+		pt := float64(capped) / float64(len(perPage))
+		st.PageTime = &pt
+	}
+	st.Days, st.PagesRead = len(days), len(perPage)
+	for _, ses := range rep.sessions() {
+		if ses.key == key {
+			st.Sessions++
+		}
+	}
+	st.estimate(percentage)
+	return rep.asOf, st, nil
+}
+
+// estimate переводит процент в текущую страницу и оценивает время до конца, как
+// «Estimated reading time left» в ReaderStatistics:getCurrentStat KOReader:
+// оставшиеся страницы × среднее время на страницу. У прочитанной книги оценки нет.
+func (st *BookStats) estimate(percentage float64) {
+	if st.Pages == nil {
+		return
+	}
+	cur := min(max(int(math.Round(percentage*float64(*st.Pages))), 1), *st.Pages)
+	st.CurrentPage = &cur
+	if st.PageTime == nil || percentage >= progress.FinishedAt {
+		return
+	}
+	left := int64(math.Round(float64(*st.Pages-cur) * *st.PageTime))
+	st.TimeLeft = &left
 }

@@ -8,6 +8,7 @@ import { meQuery } from "@/auth";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import { BookCover } from "@/components/BookCover";
 import { BookName, BookRow, ProgressBar } from "@/components/BookParts";
+import { TodayChange, useBookFigures } from "@/components/BookStats";
 import { devicesQuery } from "@/components/DeviceDialogs";
 import { HelpTrans, helpLink } from "@/components/HelpParts";
 import { HomeStats } from "@/components/HomeStats";
@@ -17,12 +18,17 @@ import { deviceLabel, formatPercent } from "@/lib/books";
 import { formatRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { booksQuery } from "@/progress";
+import { bookStatisticsQuery } from "@/statistics";
 
 const sectionLabel = "text-xs leading-4 font-medium tracking-[.06em] text-muted-foreground uppercase";
 
 function Hero({ book, now }: { book: Book; now: number }) {
   const { t, i18n } = useTranslation();
   const lang = i18n.language;
+  // Пока статистика грузится, блок без дополнительных цифр: они встают в строку
+  // устройства и, пока помещаются, ничего не сдвигают.
+  const stats = useQuery(bookStatisticsQuery(book.hash));
+  const { page, left } = useBookFigures(stats.data?.stats);
   return (
     <Link
       to="/books/$hash"
@@ -35,14 +41,21 @@ function Hero({ book, now }: { book: Book; now: number }) {
         <BookName book={book} className="text-[clamp(22px,2.6vw,28px)] leading-tight font-medium text-balance" />
         {book.authors && <div className="text-[15px] text-muted-foreground">{book.authors}</div>}
         <div className="mt-auto flex flex-col gap-2 pt-3.5">
-          <span className="text-[clamp(32px,3.6vw,40px)] leading-none font-semibold tracking-[-0.02em] tabular-nums">
-            {formatPercent(book.percentage, lang)}
-          </span>
+          <div className="flex flex-wrap items-baseline gap-x-2.5">
+            <span className="text-[clamp(32px,3.6vw,40px)] leading-none font-semibold tracking-[-0.02em] tabular-nums">
+              {formatPercent(book.percentage, lang)}
+            </span>
+            <TodayChange value={stats.data?.percentage_today} />
+          </div>
           <ProgressBar value={book.percentage} />
-          <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground [&_svg]:size-3.5">
-            <TabletSmartphone />
-            {t("book.lastSync", { device: deviceLabel(book), when: formatRelative(book.updated_at, lang, now) })}
-          </span>
+          <div className="flex flex-wrap gap-x-[18px] gap-y-1 text-[13px] text-muted-foreground tabular-nums">
+            {page && <span>{page}</span>}
+            {left && <span>{t("home.timeLeft", { value: left })}</span>}
+            <span className="flex items-center gap-1.5 [&_svg]:size-3.5">
+              <TabletSmartphone />
+              {t("book.lastSync", { device: deviceLabel(book), when: formatRelative(book.updated_at, lang, now) })}
+            </span>
+          </div>
         </div>
       </div>
     </Link>

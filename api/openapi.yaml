@@ -430,6 +430,35 @@ paths:
           $ref: "#/components/responses/BookNotFound"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/books/{hash}/statistics:
+    parameters:
+      - $ref: "#/components/parameters/BookHash"
+    get:
+      operationId: getBookStatistics
+      summary: Статистика книги
+      description: |
+        Статистика чтения книги из снимка владельца сессии (в том числе администратора —
+        только своя) и изменение процента за сегодня по журналу прогресса. Книга без
+        прогресса — 404, как карточка книги. Цифры считаются по тем же правилам, что итоги
+        `/statistics/summary`; дни — по часовому поясу `tz`.
+      tags: [statistics]
+      parameters:
+        - $ref: "#/components/parameters/TimeZone"
+      responses:
+        "200":
+          description: Статистика книги
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BookStatistics"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/BookNotFound"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/activity:
     get:
       operationId: listActivity
@@ -600,6 +629,15 @@ paths:
         Устройства у сессии нет: снимок — слияние всех читалок.
       tags: [statistics]
       parameters:
+        - name: document
+          in: query
+          required: false
+          description: |
+            Хеш документа — сессии одной книги. Сессии строятся по всем записям
+            пользователя, поэтому их границы те же, что без фильтра. Хеша нет в снимке —
+            пустой список.
+          schema:
+            type: string
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
       responses:
@@ -1240,3 +1278,81 @@ components:
         next_cursor:
           type: string
           nullable: true
+    BookReadingStats:
+      type: object
+      required:
+        - duration
+        - pages_read
+        - days
+        - sessions
+        - first_read_at
+        - last_read_at
+        - page_time
+        - pages
+        - current_page
+        - time_left
+      properties:
+        duration:
+          type: integer
+          format: int64
+          description: Время чтения книги, секунды.
+        pages_read:
+          type: integer
+          description: Различные страницы книги за всё время, в текущей разметке.
+        days:
+          type: integer
+          description: Дни с чтением книги.
+        sessions:
+          type: integer
+        first_read_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Начало самой ранней записи; `null`, если записей нет.
+        last_read_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Наибольший конец записи.
+        page_time:
+          type: number
+          format: double
+          nullable: true
+          description: |
+            Среднее время на страницу, секунды, как в KOReader: время каждой страницы
+            ограничивается 120 секундами. `null`, если записей нет.
+        pages:
+          type: integer
+          nullable: true
+          description: Число страниц книги из самой поздно открытой строки статистики с известным числом страниц.
+        current_page:
+          type: integer
+          nullable: true
+          description: Процент последней синхронизации прогресса, переведённый в страницы (1 — `pages`).
+        time_left:
+          type: integer
+          format: int64
+          nullable: true
+          description: |
+            Оценка времени до конца, секунды: оставшиеся страницы × `page_time`. `null`,
+            если страница или среднее неизвестны или книга прочитана.
+    BookStatistics:
+      type: object
+      required: [as_of, percentage_today, stats]
+      properties:
+        as_of:
+          type: string
+          format: date-time
+          nullable: true
+          description: Время приёма снимка; `null`, если статистики нет.
+        percentage_today:
+          type: number
+          format: double
+          description: |
+            Изменение процента за сегодня в поясе `tz`: от последней синхронизации до начала
+            дня (или первой сегодняшней) до последней. Может быть нулевым и отрицательным.
+        stats:
+          nullable: true
+          description: "`null`, если в снимке нет книги с этим хешем."
+          allOf:
+            - $ref: "#/components/schemas/BookReadingStats"

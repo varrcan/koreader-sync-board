@@ -221,6 +221,52 @@ type BookPage struct {
 	NextCursor *string `json:"next_cursor"`
 }
 
+// BookReadingStats defines model for BookReadingStats.
+type BookReadingStats struct {
+	// CurrentPage Процент последней синхронизации прогресса, переведённый в страницы (1 — `pages`).
+	CurrentPage *int `json:"current_page"`
+
+	// Days Дни с чтением книги.
+	Days int `json:"days"`
+
+	// Duration Время чтения книги, секунды.
+	Duration int64 `json:"duration"`
+
+	// FirstReadAt Начало самой ранней записи; `null`, если записей нет.
+	FirstReadAt *time.Time `json:"first_read_at"`
+
+	// LastReadAt Наибольший конец записи.
+	LastReadAt *time.Time `json:"last_read_at"`
+
+	// PageTime Среднее время на страницу, секунды, как в KOReader: время каждой страницы
+	// ограничивается 120 секундами. `null`, если записей нет.
+	PageTime *float64 `json:"page_time"`
+
+	// Pages Число страниц книги из самой поздно открытой строки статистики с известным числом страниц.
+	Pages *int `json:"pages"`
+
+	// PagesRead Различные страницы книги за всё время, в текущей разметке.
+	PagesRead int `json:"pages_read"`
+	Sessions  int `json:"sessions"`
+
+	// TimeLeft Оценка времени до конца, секунды: оставшиеся страницы × `page_time`. `null`,
+	// если страница или среднее неизвестны или книга прочитана.
+	TimeLeft *int64 `json:"time_left"`
+}
+
+// BookStatistics defines model for BookStatistics.
+type BookStatistics struct {
+	// AsOf Время приёма снимка; `null`, если статистики нет.
+	AsOf *time.Time `json:"as_of"`
+
+	// PercentageToday Изменение процента за сегодня в поясе `tz`: от последней синхронизации до начала
+	// дня (или первой сегодняшней) до последней. Может быть нулевым и отрицательным.
+	PercentageToday float64 `json:"percentage_today"`
+
+	// Stats `null`, если в снимке нет книги с этим хешем.
+	Stats *BookReadingStats `json:"stats"`
+}
+
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
@@ -568,6 +614,12 @@ type ListBooksParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// GetBookStatisticsParams defines parameters for GetBookStatistics.
+type GetBookStatisticsParams struct {
+	// Tz Часовой пояс IANA (`Europe/Moscow`, `UTC`), по которому считаются дни и часы.
+	Tz TimeZone `form:"tz" json:"tz"`
+}
+
 // GetStatisticsCalendarParams defines parameters for GetStatisticsCalendar.
 type GetStatisticsCalendarParams struct {
 	// Tz Часовой пояс IANA (`Europe/Moscow`, `UTC`), по которому считаются дни и часы.
@@ -576,6 +628,11 @@ type GetStatisticsCalendarParams struct {
 
 // ListReadingSessionsParams defines parameters for ListReadingSessions.
 type ListReadingSessionsParams struct {
+	// Document Хеш документа — сессии одной книги. Сессии строятся по всем записям
+	// пользователя, поэтому их границы те же, что без фильтра. Хеша нет в снимке —
+	// пустой список.
+	Document *string `form:"document,omitempty" json:"document,omitempty"`
+
 	// Limit Размер страницы.
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
@@ -624,6 +681,9 @@ type ServerInterface interface {
 	// GetBook Книга
 	// (GET /api/v1/books/{hash})
 	GetBook(w http.ResponseWriter, r *http.Request, hash BookHash)
+	// GetBookStatistics Статистика книги
+	// (GET /api/v1/books/{hash}/statistics)
+	GetBookStatistics(w http.ResponseWriter, r *http.Request, hash BookHash, params GetBookStatisticsParams)
 	// ListDevices Устройства
 	// (GET /api/v1/devices)
 	ListDevices(w http.ResponseWriter, r *http.Request)
@@ -849,6 +909,48 @@ func (siw *ServerInterfaceWrapper) GetBook(w http.ResponseWriter, r *http.Reques
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetBook(w, r, hash)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetBookStatistics operation middleware
+func (siw *ServerInterfaceWrapper) GetBookStatistics(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "hash" -------------
+	var hash BookHash
+
+	err = runtime.BindStyledParameterWithOptions("simple", "hash", r.PathValue("hash"), &hash, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hash", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetBookStatisticsParams
+
+	// ------------- Required query parameter "tz" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "tz", r.URL.Query(), &params.Tz, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tz"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tz", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetBookStatistics(w, r, hash, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1104,6 +1206,19 @@ func (siw *ServerInterfaceWrapper) ListReadingSessions(w http.ResponseWriter, r 
 	// Parameter object where we will unmarshal all parameters from the context
 	var params ListReadingSessionsParams
 
+	// ------------- Optional query parameter "document" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "document", r.URL.Query(), &params.Document, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "document"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "document", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -1351,6 +1466,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/users", wrapper.ListUsers)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books", wrapper.ListBooks)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books/{hash}", wrapper.GetBook)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books/{hash}/statistics", wrapper.GetBookStatistics)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/activity", wrapper.ListActivity)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/statistics", wrapper.GetStatistics)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/statistics/import", wrapper.ImportStatistics)

@@ -6,6 +6,7 @@ import { ApiFailure } from "@/api";
 import { ActivityFeed } from "@/components/ActivityFeed";
 import { BookCover } from "@/components/BookCover";
 import { BookName, ProgressBar } from "@/components/BookParts";
+import { BookStatsSection, TodayChange } from "@/components/BookStats";
 import { helpLink } from "@/components/HelpParts";
 import { MenuLabel, Value } from "@/components/KoreaderSetup";
 import { Badge } from "@/components/ui/badge";
@@ -13,6 +14,7 @@ import { Card } from "@/components/ui/card";
 import { deviceLabel, formatPercent, isUnknown } from "@/lib/books";
 import { formatRelative } from "@/lib/format";
 import { bookQuery } from "@/progress";
+import { bookStatisticsQuery } from "@/statistics";
 
 function BackLink() {
   const { t } = useTranslation();
@@ -32,6 +34,7 @@ export function BookPage() {
   const lang = i18n.language;
   const { hash } = useParams({ from: "/app/books/$hash" });
   const detail = useQuery(bookQuery(hash));
+  const stats = useQuery(bookStatisticsQuery(hash));
   const now = detail.dataUpdatedAt;
 
   if (detail.isPending) return <p className="text-sm text-muted-foreground">{t("common.loading")}</p>;
@@ -75,9 +78,12 @@ export function BookPage() {
             </div>
           )}
           <div className="mt-auto flex flex-col gap-2 pt-4">
-            <span className="text-[clamp(32px,3.6vw,40px)] leading-none font-semibold tracking-[-0.02em] tabular-nums">
-              {formatPercent(book.percentage, lang)}
-            </span>
+            <div className="flex flex-wrap items-baseline gap-x-2.5">
+              <span className="text-[clamp(32px,3.6vw,40px)] leading-none font-semibold tracking-[-0.02em] tabular-nums">
+                {formatPercent(book.percentage, lang)}
+              </span>
+              <TodayChange value={stats.data?.percentage_today} />
+            </div>
             <ProgressBar value={book.percentage} />
             <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground [&_svg]:size-3.5">
               <TabletSmartphone />
@@ -107,6 +113,9 @@ export function BookPage() {
       <div className="max-w-3xl">
         <Value label={t("book.hash")} value={book.hash} />
       </div>
+
+      {stats.data && <BookStatsSection hash={book.hash} data={stats.data} now={stats.dataUpdatedAt} />}
+      {stats.isError && <p className="text-sm text-destructive">{t("common.loadError")}</p>}
 
       <div className="flex max-w-5xl flex-wrap items-start gap-4">
         <section className="flex min-w-0 flex-[1_1_300px] flex-col gap-2.5 rounded-xl border bg-card p-5">

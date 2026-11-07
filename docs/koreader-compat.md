@@ -209,6 +209,36 @@ first.
   zone database is embedded in the binary.
 - Days after the snapshot was received have no data yet and are shown hatched, not as zero.
 
+### One book
+
+`GET /api/v1/books/{hash}/statistics` mirrors KOReader's book statistics screen
+(`ReaderStatistics:getCurrentStat`), with the same rules as above:
+
+- **Pages read** is the number of distinct pages of the book in its current layout, as
+  `count(DISTINCT page)` over `page_stat`; **days** count dates with records in `tz`.
+- **Time per page** is KOReader's `avg_time`: `STATISTICS_SQL_BOOK_CAPPED_TOTALS_QUERY` caps
+  each page's time (the view's per-page shares summed) at `max_sec` and divides by the number
+  of pages. `max_sec` lives in the reader's `settings.reader.lua`, not in the statistics file,
+  so the server uses KOReader's default `DEFAULT_MAX_READ_SEC = 120`; a reader with another
+  limit shows a different estimate.
+- **Page count** comes from the hash's `book` row with the latest `last_open` among rows with
+  `pages > 0`. On merge, KOReader updates an existing row's `last_open` but not its `pages`, so
+  this is the layout of the reader that created that row, not necessarily of the last reader.
+- **Current page.** KOReader takes it from the open document. kosync carries no page number
+  (`progress` is an xpointer for reflowable formats), so the server derives it from the last
+  synced `percentage`: `clamp(round(percentage × pages), 1, pages)`. KOReader computes
+  `percentage` as `current_page / page_count` (outside scroll mode), so the number matches when
+  the syncing reader has the same layout as the row the page count comes from, and is
+  approximate otherwise.
+- **Time left** is `(pages − current_page) × time per page`, as KOReader's “Estimated reading
+  time left”. KOReader replaces it with “finished” for a book marked finished; the server has
+  no book status and drops it at `percentage ≥ 0.9995`, the panel's “finished” threshold.
+- **Today's change** comes from the progress log, not from statistics: the latest percentage
+  minus the last one received before midnight in `tz` (or the first one today), across all
+  devices, by server receive time.
+- Where a hash has several `book` rows, KOReader shows only the row of the open `id_book`;
+  the server counts all rows of the hash.
+
 ## Storage model
 
 - `progress_events` is append-only (an `UPDATE` trigger aborts). Every accepted

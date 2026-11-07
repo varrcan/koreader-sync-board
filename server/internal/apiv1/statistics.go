@@ -155,7 +155,7 @@ func (s *Server) ListReadingSessions(w http.ResponseWriter, r *http.Request, par
 		}
 		after = &c
 	}
-	items, next, err := s.Statistics.Sessions(r.Context(), cur.User.ID, after, limit)
+	items, next, err := s.Statistics.Sessions(r.Context(), cur.User.ID, params.Document, after, limit)
 	if err != nil {
 		s.internal(w, "reading sessions", err)
 		return
@@ -173,6 +173,46 @@ func (s *Server) ListReadingSessions(w http.ResponseWriter, r *http.Request, par
 			Duration:  ses.Duration,
 			Pages:     ses.Pages,
 		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// GetBookStatistics — статистика книги из снимка и изменение процента за сегодня.
+// Видимость — как у карточки книги: без прогресса 404.
+func (s *Server) GetBookStatistics(w http.ResponseWriter, r *http.Request, hash BookHash, params GetBookStatisticsParams) {
+	cur, _ := panelauth.FromContext(r.Context())
+	loc, ok := timeZone(w, params.Tz)
+	if !ok {
+		return
+	}
+	b, _, err := s.Progress.Book(r.Context(), cur.User.ID, hash)
+	if s.progressFailed(w, "book statistics", err) {
+		return
+	}
+	y, m, d := time.Now().In(loc).Date()
+	today, err := s.Progress.Today(r.Context(), cur.User.ID, hash, time.Date(y, m, d, 0, 0, 0, 0, loc))
+	if s.progressFailed(w, "book statistics", err) {
+		return
+	}
+	asOf, st, err := s.Statistics.Book(r.Context(), cur.User.ID, hash, b.Percentage, loc)
+	if err != nil {
+		s.internal(w, "book statistics", err)
+		return
+	}
+	out := BookStatistics{AsOf: asOf, PercentageToday: today}
+	if st != nil {
+		out.Stats = &BookReadingStats{
+			Duration:    st.Duration,
+			PagesRead:   st.PagesRead,
+			Days:        st.Days,
+			Sessions:    st.Sessions,
+			FirstReadAt: st.FirstReadAt,
+			LastReadAt:  st.LastReadAt,
+			PageTime:    st.PageTime,
+			Pages:       st.Pages,
+			CurrentPage: st.CurrentPage,
+			TimeLeft:    st.TimeLeft,
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
 }

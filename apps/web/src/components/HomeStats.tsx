@@ -1,5 +1,5 @@
-import type { ReadingSession, StatisticsSummary } from "@ksb/api-client";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import type { StatisticsSummary } from "@ksb/api-client";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChartNoAxesColumn } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -13,9 +13,9 @@ import {
   speed,
   useChange,
 } from "@/components/StatsCharts";
-import { formatDay, formatTime, groupByDay, statBookTitle } from "@/lib/books";
+import { SessionList } from "@/components/SessionList";
 import { formatDuration } from "@/lib/format";
-import { sessionsQuery, summaryQuery } from "@/statistics";
+import { summaryQuery } from "@/statistics";
 
 const card = "flex min-w-0 flex-col rounded-xl border bg-card p-5";
 
@@ -61,11 +61,7 @@ function Week({ summary }: { summary: StatisticsSummary }) {
 }
 
 function Sessions({ stale }: { stale: string | null }) {
-  const { t, i18n } = useTranslation();
-  const lang = i18n.language;
-  const sessions = useInfiniteQuery(sessionsQuery(5));
-  const now = sessions.dataUpdatedAt;
-  const items = sessions.data?.pages[0]?.items ?? [];
+  const { t } = useTranslation();
   return (
     <section className={`${card} flex-[1_1_320px] gap-3.5`}>
       <div className="flex items-baseline justify-between gap-3">
@@ -77,44 +73,7 @@ function Sessions({ stale }: { stale: string | null }) {
           {t("home.toStats")}
         </Link>
       </div>
-      {sessions.isPending && <p className="text-sm text-muted-foreground">{t("common.loading")}</p>}
-      {sessions.isError && <p className="text-sm text-destructive">{t("common.loadError")}</p>}
-      {sessions.isSuccess && items.length === 0 && (
-        <p className="text-sm text-muted-foreground">{t("home.sessionsEmpty")}</p>
-      )}
-      {groupByDay(items, now, (s: ReadingSession) => s.started_at).map((d) => (
-        <div key={d.day.getTime()} className="flex flex-col">
-          <h3 className="flex justify-between gap-2 pb-1.5 text-xs font-medium tracking-[.06em] text-muted-foreground uppercase">
-            <span>
-              {d.ago === 0 ? t("feed.today") : d.ago === 1 ? t("feed.yesterday") : formatDay(d.day, lang, now)}
-            </span>
-            <span className="tracking-normal normal-case tabular-nums">
-              {formatDuration(
-                d.items.reduce((sum, s) => sum + s.duration, 0),
-                lang,
-              )}
-            </span>
-          </h3>
-          <ul className="flex flex-col">
-            {d.items.map((s) => (
-              <li key={`${s.started_at}-${s.book.hash}`} className="flex gap-3 border-t py-[7px]">
-                <span className="w-24 shrink-0 text-[13px] leading-[18px] text-muted-foreground tabular-nums">
-                  {formatTime(s.started_at, lang)}–{formatTime(s.ended_at, lang)}
-                </span>
-                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <div className="flex items-baseline gap-2 text-sm leading-[18px] tabular-nums">
-                    <span className="font-semibold">{formatDuration(s.duration, lang)}</span>
-                    <span className="text-[13px] text-muted-foreground">{t("stats.pages", { count: s.pages })}</span>
-                  </div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    {statBookTitle(s.book, t("books.unknown"))}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
+      <SessionList limit={5} />
     </section>
   );
 }

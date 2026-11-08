@@ -129,7 +129,8 @@ const metaColumns = `coalesce(c.meta_title, st.title, lb.title), coalesce(c.meta
 
 const bookColumns = `d.hash, ` + metaColumns + `,
 	e.percentage, e.server_ts, cr.name, e.device, c.event_id, lb.id,
-	(SELECT f.cover FROM library_files f WHERE f.book_id = lb.id AND f.cover IS NOT NULL ORDER BY f.id LIMIT 1)
+	coalesce((SELECT m.cover FROM library_book_meta m WHERE m.book_id = lb.id),
+		(SELECT f.cover FROM library_files f WHERE f.book_id = lb.id AND f.cover IS NOT NULL ORDER BY f.id LIMIT 1))
 	FROM progress_current c
 	JOIN documents d ON d.id = c.document_id
 	JOIN progress_events e ON e.id = c.event_id

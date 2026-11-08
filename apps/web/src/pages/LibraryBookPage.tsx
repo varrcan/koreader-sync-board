@@ -1,13 +1,14 @@
 import type { LibraryBook, LibraryFile } from "@ksb/api-client";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Download, Merge, Pin, Split } from "lucide-react";
+import { ArrowLeft, BookText, Download, Merge, Pin, Split } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiFailure } from "@/api";
 import { meQuery } from "@/auth";
 import { BookCover } from "@/components/BookCover";
 import { FormError } from "@/components/FormError";
+import { MetadataDialog } from "@/components/MetadataDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -24,6 +25,7 @@ import { displayTitle, formatPercent } from "@/lib/books";
 import { formatSize } from "@/lib/format";
 import {
   downloadFile,
+  externalSource,
   libraryBookQuery,
   libraryBooksQuery,
   libraryErrorText,
@@ -210,6 +212,7 @@ function BookView({ id }: { id: number }) {
   const split = useSplitFile();
   const navigate = useNavigate();
   const [merging, setMerging] = useState(false);
+  const [editing, setEditing] = useState(false);
   const isAdmin = me?.role === "admin";
 
   if (detail.isPending) return <p className="text-sm text-muted-foreground">{t("common.loading")}</p>;
@@ -223,7 +226,8 @@ function BookView({ id }: { id: number }) {
     );
   }
 
-  const { book, files } = detail.data;
+  const { book, files, description, metadata } = detail.data;
+  const source = externalSource(metadata?.source);
   const series = book.series && (book.series_index === null ? book.series : `${book.series} #${book.series_index}`);
   const facts = [
     series && { label: t("library.detail.series"), value: series },
@@ -245,14 +249,28 @@ function BookView({ id }: { id: number }) {
               {f.label}: <span className="text-foreground">{f.value}</span>
             </div>
           ))}
+          {source && <div className="text-xs text-muted-foreground">{t("library.metadata.source", { name: source })}</div>}
           {isAdmin && (
-            <Button variant="outline" className="mt-3 self-start" onClick={() => setMerging(true)}>
-              <Merge />
-              {t("library.detail.merge")}
-            </Button>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => setEditing(true)}>
+                <BookText />
+                {t("library.metadata.button")}
+              </Button>
+              <Button variant="outline" onClick={() => setMerging(true)}>
+                <Merge />
+                {t("library.detail.merge")}
+              </Button>
+            </div>
           )}
         </div>
       </section>
+
+      {description && (
+        <section className="flex max-w-5xl flex-col gap-2 rounded-xl border bg-card p-5">
+          <h2 className="text-[15px] leading-5 font-semibold">{t("library.detail.description")}</h2>
+          <p className="text-sm leading-6 whitespace-pre-line [overflow-wrap:anywhere]">{description}</p>
+        </section>
+      )}
 
       <section className="flex max-w-5xl flex-col gap-1 rounded-xl border bg-card p-5">
         <h2 className="text-[15px] leading-5 font-semibold">{t("library.detail.files")}</h2>
@@ -275,6 +293,7 @@ function BookView({ id }: { id: number }) {
         </ul>
       </section>
       {merging && <MergeDialog book={book} onClose={() => setMerging(false)} />}
+      {editing && <MetadataDialog detail={detail.data} onClose={() => setEditing(false)} />}
     </>
   );
 }

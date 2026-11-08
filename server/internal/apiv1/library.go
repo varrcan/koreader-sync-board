@@ -1,6 +1,7 @@
 package apiv1
 
 import (
+	"context"
 	"errors"
 	"mime"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
 	"github.com/varrcan/koreader-sync-board/server/internal/library"
+	"github.com/varrcan/koreader-sync-board/server/internal/library/lookup"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 )
 
@@ -36,9 +38,22 @@ var contentTypes = map[string]string{
 
 // Library — индекс библиотеки и его сканер.
 type Library struct {
-	Store   *library.Store
-	Scanner *library.Scanner
-	Covers  *library.Covers
+	Store       *library.Store
+	Scanner     *library.Scanner
+	Covers      *library.Covers
+	Files       library.FileReader
+	Lookup      MetadataLookup
+	CoverSource CoverSource
+}
+
+// MetadataLookup ищет кандидатов во внешних каталогах.
+type MetadataLookup interface {
+	Search(ctx context.Context, q lookup.Query) lookup.Result
+}
+
+// CoverSource скачивает обложку кандидата.
+type CoverSource interface {
+	Fetch(ctx context.Context, url string) ([]byte, error)
 }
 
 func (s *Server) GetLibrary(w http.ResponseWriter, r *http.Request) {
@@ -220,7 +235,10 @@ func (s *Server) writeLibraryBook(w http.ResponseWriter, r *http.Request, status
 		s.internal(w, "get library book", err)
 		return
 	}
-	out := LibraryBookDetail{Book: libraryBook(d.Book), Files: make([]LibraryFile, 0, len(d.Files))}
+	out := LibraryBookDetail{Book: libraryBook(d.Book), Files: make([]LibraryFile, 0, len(d.Files)), Description: d.Description}
+	if m := d.Metadata; m != nil {
+		out.Metadata = &LibraryBookMetadataInfo{Source: m.Source, UpdatedAt: m.UpdatedAt}
+	}
 	for _, f := range d.Files {
 		out.Files = append(out.Files, libraryFile(f))
 	}

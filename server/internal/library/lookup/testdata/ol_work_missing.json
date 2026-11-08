@@ -1,0 +1,30 @@
+{
+ "key": "/works/OL219602W",
+ "title": "The Hobbit",
+ "authors": [
+  {
+   "author": {
+    "key": "/authors/OL2453782A"
+   },
+   "type": {
+    "key": "/type/author_role"
+   }
+  },
+  {
+   "author": {
+    "key": "/authors/OL758306A"
+   },
+   "type": {
+    "key": "/type/author_role"
+   }
+  },
+  {
+   "author": {
+    "key": "/authors/OL26320A"
+   },
+   "type": {
+    "key": "/type/author_role"
+   }
+  }
+ ]
+}

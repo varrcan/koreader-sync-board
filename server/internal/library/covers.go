@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sync"
 
 	"golang.org/x/image/draw"
 
@@ -85,9 +86,11 @@ func fitThumb(w, h int) (int, int) {
 }
 
 // Covers — каталог миниатюр. Имя файла — хеш содержимого, поэтому URL неизменяем
-// и одинаковые обложки хранятся один раз. Пишет только горутина сканера.
+// и одинаковые обложки хранятся один раз. Пишут горутина сканера и панель; уборка
+// идёт в горутине сканера, поэтому от неё защищена только запись панели.
 type Covers struct {
 	dir string
+	mu  sync.Mutex // «сохранить + записать строку» против «прочитать used + убрать»
 }
 
 // NewCovers создаёт хранилище; каталог появится при первой записи.
@@ -128,6 +131,29 @@ func (c *Covers) Open(id string) (*os.File, error) {
 		return nil, ErrCoverNotFound
 	}
 	return f, err
+}
+
+// Attach сохраняет миниатюру и записывает ссылку на неё: без общего замка уборка
+// удалила бы файл, сохранённый до появления строки в БД.
+func (c *Covers) Attach(thumb []byte, commit func(id string) error) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	id, err := c.save(thumb)
+	if err != nil {
+		return err
+	}
+	return commit(id)
+}
+
+// sweep удаляет миниатюры, на которые нет ссылок.
+func (c *Covers) sweep(used func() (map[string]bool, error)) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	u, err := used()
+	if err != nil {
+		return err
+	}
+	return c.prune(u)
 }
 
 // prune удаляет всё, что не входит в used, включая временные файлы после сбоя.

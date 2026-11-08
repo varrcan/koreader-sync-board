@@ -422,8 +422,9 @@ func fileBooks(ctx context.Context, tx *sql.Tx, ids string) ([]int64, error) {
 	return books, rows.Err()
 }
 
-// refreshBooks пересчитывает метаданные книг из их файлов (файл с наименьшим id
-// среди файлов с названием) и удаляет книги без файлов; ключи уходят каскадом.
+// refreshBooks пересчитывает метаданные книг: поле правки, иначе поле файла с
+// наименьшим id среди файлов с названием. Пустая правка скрывает значение файла.
+// Книги без файлов удаляются; ключи и правки уходят каскадом.
 func refreshBooks(ctx context.Context, tx *sql.Tx, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
@@ -434,8 +435,14 @@ func refreshBooks(ctx context.Context, tx *sql.Tx, ids []int64) error {
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE library_books SET (title, authors, series, series_index, language) = (
-			SELECT f.title, f.authors, f.series, f.series_index, f.language FROM library_files f
-			WHERE f.book_id = library_books.id AND f.title IS NOT NULL ORDER BY f.id LIMIT 1)
+			SELECT nullif(coalesce(m.title, f.title), ''), nullif(coalesce(m.authors, f.authors), ''),
+				nullif(coalesce(m.series, f.series), ''),
+				CASE WHEN m.series IS NOT NULL THEN m.series_index ELSE f.series_index END,
+				nullif(coalesce(m.language, f.language), '')
+			FROM library_books b
+			LEFT JOIN library_book_meta m ON m.book_id = b.id
+			`+sourceFile+`
+			WHERE b.id = library_books.id)
 		WHERE id IN (SELECT value FROM json_each(?))`, string(list)); err != nil {
 		return err
 	}
@@ -482,9 +489,10 @@ func (s *Store) setCover(ctx context.Context, id int64, cover string) error {
 	return err
 }
 
-// usedCovers — миниатюры, на которые ссылается индекс.
+// usedCovers — миниатюры, на которые ссылаются файлы и правки книг.
 func (s *Store) usedCovers(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.db.Read.QueryContext(ctx, `SELECT DISTINCT cover FROM library_files WHERE cover IS NOT NULL`)
+	rows, err := s.db.Read.QueryContext(ctx, `SELECT cover FROM library_files WHERE cover IS NOT NULL
+		UNION SELECT cover FROM library_book_meta WHERE cover IS NOT NULL`)
 	if err != nil {
 		return nil, err
 	}

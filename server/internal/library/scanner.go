@@ -233,12 +233,8 @@ func (s *Scanner) extractCovers(ctx context.Context) {
 			}
 		}
 	}
-	used, err := s.store.usedCovers(ctx)
-	if err != nil {
-		warn("library: covers failed", err)
-		return
-	}
-	if err := s.covers.prune(used); err != nil {
+	used := func() (map[string]bool, error) { return s.store.usedCovers(ctx) }
+	if err := s.covers.sweep(used); err != nil {
 		warn("library: covers cleanup failed", err)
 	}
 	s.log.Info("library: covers finished", "checked", checked, "found", found, "retry", retry,

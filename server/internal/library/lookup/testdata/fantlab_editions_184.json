@@ -1,0 +1,17 @@
+{
+ "matches": [
+  {
+   "autors": "[autor=1]Дэн Симмонс[/autor]",
+   "correct": 2,
+   "edition_id": 184,
+   "isbn": "5-88196-387-3",
+   "name": "Гиперион",
+   "notes": "1996 г. - доп. тираж 10000 экз.\r\n1997 г. - доп. тираж 5000 экз.",
+   "plan_date": "",
+   "publisher": "[pub=33]АСТ[/pub]",
+   "series": "[series=288]Координаты чудес[/series]",
+   "year": 1995
+  }
+ ],
+ "total_found": 1
+}

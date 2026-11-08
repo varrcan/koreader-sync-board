@@ -77,7 +77,7 @@ func newEnv(t *testing.T, statsOpts ...statistics.Option) *env {
 	t.Cleanup(func() { stopScanner(); <-scannerDone })
 	api := &Server{Accounts: acc, Auth: panelauth.New(acc, nil, log), Setup: setup,
 		Progress: progress.New(db), Statistics: stats, Log: log,
-		Library: Library{Store: lib, Scanner: scanner, Covers: covers}}
+		Library: Library{Store: lib, Scanner: scanner, Covers: covers, Files: library.NewFileReader()}}
 	srv := httptest.NewServer(NewHandler(api))
 	t.Cleanup(srv.Close)
 	return &env{t: t, ctx: ctx, url: srv.URL, db: db, acc: acc, setup: setup, stats: stats, logs: logs, srv: api}

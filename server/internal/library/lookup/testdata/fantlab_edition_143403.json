@@ -1,0 +1,57 @@
+{
+ "content": null,
+ "copies": 213000,
+ "correct_level": 1.0,
+ "cover_type": "мягкая",
+ "creators": {
+  "authors": [
+   {
+    "id": "52",
+    "is_opened": 1,
+    "name": "Аркадий и Борис Стругацкие",
+    "sex": 1,
+    "type": "autor"
+   }
+  ],
+  "compilers": null,
+  "publishers": [
+   {
+    "id": "33",
+    "name": "АСТ",
+    "type": "publisher"
+   }
+  ]
+ },
+ "description": "Внецикловый роман.\r\nХудожник не указан.",
+ "edition_id": 143403,
+ "edition_name": "Пикник на обочине",
+ "edition_type": "авторская книга",
+ "edition_type_plus": [],
+ "edition_work_id": null,
+ "format": "76x100/32",
+ "format_mm": "115x180",
+ "image": "/images/editions/big/143403?r=1660839885",
+ "image_preview": "/images/editions/small/143403?r=1660839885",
+ "images_plus": null,
+ "isbns": [
+  "978-5-17-088647-0"
+ ],
+ "lang": "русский",
+ "lang_code": "ru",
+ "last_modified": "2024-08-30 17:48:44",
+ "notes": "[u]Доп. тиражи:[/u]\r\n2015 г. - 5000 экз. - подписано в печат",
+ "pages": 256,
+ "plan_date": "",
+ "plan_description": "",
+ "preread": 0,
+ "series": [
+  {
+   "id": "4491",
+   "is_opened": 1,
+   "name": "Эксклюзив: Русская классика",
+   "type": "series"
+  }
+ ],
+ "type": 10,
+ "year": 2015
+}

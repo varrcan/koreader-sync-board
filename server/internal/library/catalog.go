@@ -30,8 +30,8 @@ func init() {
 }
 
 // Book — книга библиотеки. Formats — различные форматы файлов в порядке их id,
-// Filename — имя без каталогов файла с наименьшим id, Cover — миниатюра первого
-// файла с обложкой.
+// Filename — имя без каталогов файла с наименьшим id, Cover — миниатюра правки,
+// иначе первого файла с обложкой.
 type Book struct {
 	ID                     int64
 	Title, Authors, Series *string
@@ -68,10 +68,13 @@ type File struct {
 	Progress       *FileProgress
 }
 
-// BookDetail — книга и её файлы по возрастанию id.
+// BookDetail — книга и её файлы по возрастанию id. Description и Metadata — nil,
+// если их нет в правках.
 type BookDetail struct {
-	Book  Book
-	Files []File
+	Book        Book
+	Files       []File
+	Description *string
+	Metadata    *MetadataInfo
 }
 
 // FileLocation — где файл лежит на диске.
@@ -83,7 +86,8 @@ type FileLocation struct {
 const wordCond = ` AND (instr(ksb_fold(concat_ws(' ', lb.title, lb.authors, lb.series)), ?) > 0
 	OR EXISTS (SELECT 1 FROM library_files f WHERE f.book_id = lb.id AND instr(ksb_fold(f.path), ?) > 0))`
 
-const bookSelect = `SELECT lb.id, lb.title, lb.authors, lb.series, lb.series_index, lb.language FROM library_books lb`
+const bookSelect = `SELECT lb.id, lb.title, lb.authors, lb.series, lb.series_index, lb.language,
+	(SELECT m.cover FROM library_book_meta m WHERE m.book_id = lb.id) FROM library_books lb`
 
 // Books возвращает страницу каталога от последней созданной книги к более ранним.
 // before — курсор (0 — с начала). Каждое слово q ищется подстрокой, порядок слов
@@ -148,7 +152,11 @@ func (s *Store) Book(ctx context.Context, id, userID int64) (BookDetail, error) 
 	if err := fillProgress(ctx, tx, id, userID, files); err != nil {
 		return BookDetail{}, err
 	}
-	return BookDetail{Book: books[0], Files: files}, nil
+	description, info, err := bookMetadata(ctx, tx, id)
+	if err != nil {
+		return BookDetail{}, err
+	}
+	return BookDetail{Book: books[0], Files: files, Description: description, Metadata: info}, nil
 }
 
 func queryBooks(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]Book, error) {
@@ -160,14 +168,15 @@ func queryBooks(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]B
 	books := []Book{}
 	for rows.Next() {
 		var (
-			b                                Book
-			title, authors, series, language sql.NullString
-			index                            sql.NullFloat64
+			b                                       Book
+			title, authors, series, language, cover sql.NullString
+			index                                   sql.NullFloat64
 		)
-		if err := rows.Scan(&b.ID, &title, &authors, &series, &index, &language); err != nil {
+		if err := rows.Scan(&b.ID, &title, &authors, &series, &index, &language, &cover); err != nil {
 			return nil, err
 		}
 		b.Title, b.Authors, b.Series, b.Language = nullable(title), nullable(authors), nullable(series), nullable(language)
+		b.Cover = nullable(cover)
 		if index.Valid {
 			b.SeriesIndex = &index.Float64
 		}
@@ -297,7 +306,9 @@ func (s *Store) FileLocation(ctx context.Context, id int64) (FileLocation, error
 }
 
 // Merge вливает книгу from в into: ключи и файлы переходят, файлы закрепляются,
-// from удаляется. Прогресс привязан к хешам и не меняется.
+// from удаляется. Правки into остаются, а если их нет — переходят правки from,
+// иначе ручная работа исчезла бы вместе с источником. Прогресс привязан к хешам и
+// не меняется.
 func (s *Store) Merge(ctx context.Context, into, from int64) error {
 	if into == from {
 		return ErrSameBook
@@ -319,6 +330,22 @@ func (s *Store) Merge(ctx context.Context, into, from int64) error {
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE library_files SET book_id = ?, pinned = 1 WHERE book_id = ?`, into, from); err != nil {
 		return err
+	}
+	res, err := tx.ExecContext(ctx, `
+		INSERT OR IGNORE INTO library_book_meta
+			(book_id, title, authors, series, series_index, language, description, cover, source, updated_at)
+		SELECT ?, title, authors, series, series_index, language, description, cover, source, updated_at
+		FROM library_book_meta WHERE book_id = ?`, into, from)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n > 0 {
+		// Правки держат закрепление всех файлов книги, в том числе файлов приёмника.
+		if _, err := tx.ExecContext(ctx, `UPDATE library_files SET pinned = 1 WHERE book_id = ?`, into); err != nil {
+			return err
+		}
 	}
 	if err := refreshBooks(ctx, tx, []int64{into, from}); err != nil {
 		return err

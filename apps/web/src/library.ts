@@ -1,4 +1,11 @@
-import type { LibraryBookDetail, LibraryBookPage, LibraryRoot, LibrarySummary } from "@ksb/api-client";
+import type {
+  LibraryBookDetail,
+  LibraryBookPage,
+  LibraryMetadataCandidates,
+  LibraryMetadataForm,
+  LibraryRoot,
+  LibrarySummary,
+} from "@ksb/api-client";
 import {
   infiniteQueryOptions,
   queryOptions,
@@ -174,6 +181,63 @@ export function useSplitFile() {
   });
 }
 
+export type CandidateSearch = { q?: string; isbn?: string };
+
+/**
+ * Каждый запрос — обращение к внешним каталогам с их лимитами, поэтому без
+ * автоповтора и обновлений; префикс свой, чтобы инвалидация библиотеки его не задевала.
+ */
+export function libraryCandidatesQuery(id: number, search: CandidateSearch) {
+  return queryOptions({
+    queryKey: ["library-candidates", id, search],
+    retry: false,
+    staleTime: Infinity,
+    gcTime: 0,
+    queryFn: async (): Promise<LibraryMetadataCandidates> => {
+      const { data, error, response } = await api.GET("/api/v1/library/books/{id}/metadata/candidates", {
+        params: { path: { id }, query: search },
+      });
+      if (error) throw failure(error, response);
+      return data;
+    },
+  });
+}
+
+/** Правка меняет название, обложку и поиск каталога и названия книг прогресса. */
+function invalidateBook(client: QueryClient) {
+  void client.invalidateQueries({ queryKey: ["library", "books"] });
+  invalidateProgress(client);
+}
+
+export function useSaveMetadata(id: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: LibraryMetadataForm): Promise<LibraryBookDetail> => {
+      const { data, error, response } = await api.PUT("/api/v1/library/books/{id}/metadata", {
+        params: { path: { id } },
+        body,
+      });
+      if (error) throw failure(error, response);
+      return data;
+    },
+    onSuccess: () => invalidateBook(client),
+  });
+}
+
+export function useClearMetadata(id: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<LibraryBookDetail> => {
+      const { data, error, response } = await api.DELETE("/api/v1/library/books/{id}/metadata", {
+        params: { path: { id } },
+      });
+      if (error) throw failure(error, response);
+      return data;
+    },
+    onSuccess: () => invalidateBook(client),
+  });
+}
+
 const fileContentUrl = (id: number) => `/api/v1/library/files/${id}/content`;
 
 /**
@@ -191,6 +255,22 @@ export async function downloadFile(id: number): Promise<boolean> {
 }
 
 type TFunction = Parameters<typeof errorText>[0];
+
+const providerNames: Record<string, string> = {
+  fantlab: "FantLab",
+  openlibrary: "Open Library",
+  google: "Google Books",
+};
+
+/** Подпись источника кандидата. */
+export function providerName(t: TFunction, id: string): string {
+  return providerNames[id] ?? t("library.metadata.fromFile");
+}
+
+/** Внешний источник правки; файл и ручная правка подписи не имеют. */
+export function externalSource(source: string | null | undefined): string | undefined {
+  return source ? providerNames[source] : undefined;
+}
 
 /** errorText, где not_found — про библиотеку: общий текст говорит об устройстве. */
 export function libraryErrorText(t: TFunction, err: unknown): string {

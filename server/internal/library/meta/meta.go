@@ -14,13 +14,17 @@ import (
 	"strings"
 )
 
-// Book — метаданные одного файла. Пустая строка — значения нет.
+// Book — метаданные одного файла. Пустая строка — значения нет. ISBN — только цифры
+// (и X) с верной контрольной суммой, Description — простой текст с абзацами через
+// пустую строку.
 type Book struct {
 	Title       string
 	Authors     []string
 	Series      string
 	SeriesIndex *float64
 	Language    string
+	ISBN        string
+	Description string
 }
 
 // maxRead — предел распакованных байтов, которые читаются из описания FB2 или OPF.
@@ -44,6 +48,25 @@ func Parse(path, format string) (Book, error) {
 	return Book{}, nil
 }
 
+// ParseAt разбирает уже открытый файл: так вызывающий сам решает, как его открыть
+// (Parse разыменовывает симлинки по пути).
+func ParseAt(r io.ReaderAt, size int64, format string) (Book, error) {
+	switch format {
+	case "fb2":
+		return FB2(io.NewSectionReader(r, 0, size))
+	case "fb2.zip", "epub":
+		z, err := zip.NewReader(r, size)
+		if err != nil {
+			return Book{}, err
+		}
+		if format == "epub" {
+			return epubArchive(z)
+		}
+		return fb2Archive(z)
+	}
+	return Book{}, nil
+}
+
 func parseFile(path string, parse func(io.Reader) (Book, error)) (Book, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -60,7 +83,11 @@ func FB2Zip(path string) (Book, error) {
 		return Book{}, err
 	}
 	defer z.Close()
-	f, err := fb2Entry(&z.Reader)
+	return fb2Archive(&z.Reader)
+}
+
+func fb2Archive(z *zip.Reader) (Book, error) {
+	f, err := fb2Entry(z)
 	if err != nil {
 		return Book{}, err
 	}

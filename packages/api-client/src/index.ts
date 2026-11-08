@@ -46,6 +46,9 @@ export type LibraryBook = Schemas["LibraryBook"];
 export type LibraryBookPage = Schemas["LibraryBookPage"];
 export type LibraryBookDetail = Schemas["LibraryBookDetail"];
 export type LibraryFile = Schemas["LibraryFile"];
+export type LibraryMetadataCandidates = Schemas["LibraryMetadataCandidates"];
+export type LibraryMetadataCandidate = Schemas["LibraryMetadataCandidate"];
+export type LibraryMetadataForm = Schemas["LibraryMetadataForm"];
 
 export type ApiClient = ReturnType<typeof createApiClient>;
 

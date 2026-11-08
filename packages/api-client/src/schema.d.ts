@@ -703,6 +703,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/books/{id}/metadata/candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryBookID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Найти метаданные книги
+         * @description Только администратору. Кандидаты из файлов книги и внешних каталогов. Без `q` и
+         *     `isbn` запрос строится сам: ISBN из файлов, текст из названия и авторов, иначе из
+         *     имени файла. Если передан хотя бы один параметр, поиск идёт только по переданному.
+         *     Сбой каталога отражается в `providers`, ответ остаётся 200.
+         */
+        get: operations["getLibraryBookMetadataCandidates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/books/{id}/metadata": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryBookID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Сохранить правку метаданных
+         * @description Только администратору. Заменяет все правки книги: значение, совпавшее с данными
+         *     файла, не хранится, пустое — скрывает значение файла. При наличии правок все файлы
+         *     книги закрепляются за ней.
+         */
+        put: operations["putLibraryBookMetadata"];
+        post?: never;
+        /**
+         * Сбросить правки метаданных
+         * @description Только администратору. Удаляет все правки книги, включая обложку. Закрепление файлов остаётся.
+         */
+        delete: operations["deleteLibraryBookMetadata"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/covers/{cover}": {
         parameters: {
             query?: never;
@@ -846,8 +899,8 @@ export interface components {
             /** @description Имя без каталогов файла с наименьшим id. */
             filename: string;
             /**
-             * @description Идентификатор миниатюры для `GET /api/v1/library/covers/{cover}`: обложка файла с
-             *     наименьшим id среди файлов книги с обложкой. `null`, если обложки нет.
+             * @description Идентификатор миниатюры для `GET /api/v1/library/covers/{cover}`: обложка правки, иначе
+             *     файла с наименьшим id среди файлов книги с обложкой. `null`, если обложки нет.
              */
             cover: string | null;
         };
@@ -885,6 +938,64 @@ export interface components {
         LibraryBookDetail: {
             book: components["schemas"]["LibraryBook"];
             files: components["schemas"]["LibraryFile"][];
+            /** @description Аннотация из правки. */
+            description: string | null;
+            /** @description `null`, если правок нет. */
+            metadata: components["schemas"]["LibraryBookMetadataInfo"] | null;
+        };
+        LibraryBookMetadataInfo: {
+            /** @description `file`, `fantlab`, `openlibrary`, `google`; `null` — вручную. */
+            source: string | null;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        LibraryMetadataCandidates: {
+            /** @description Текст, по которому шёл поиск. */
+            query: string | null;
+            /** @description ISBN, по которому шёл поиск. */
+            isbn: string | null;
+            items: components["schemas"]["LibraryMetadataCandidate"][];
+            providers: components["schemas"]["LibraryMetadataProvider"][];
+        };
+        LibraryMetadataProvider: {
+            /** @example fantlab */
+            id: string;
+            /** @description `ok` или `error`. */
+            status: string;
+        };
+        LibraryMetadataCandidate: {
+            /** @description `file`, `fantlab`, `openlibrary` или `google`. */
+            provider: string;
+            /** @description `file`, `isbn` или `text`. */
+            match: string;
+            title: string | null;
+            authors: string | null;
+            series: string | null;
+            /** Format: double */
+            series_index: number | null;
+            language: string | null;
+            year: number | null;
+            /** @description Простой текст, абзацы разделены пустой строкой. */
+            description: string | null;
+            isbn: string | null;
+            cover_url: string | null;
+            url: string | null;
+        };
+        /** @description Форма целиком. Отсутствующее или пустое поле означает, что значения нет. */
+        LibraryMetadataForm: {
+            title?: string | null;
+            authors?: string | null;
+            series?: string | null;
+            /** Format: double */
+            series_index?: number | null;
+            language?: string | null;
+            description?: string | null;
+            /** @description `file`, `fantlab`, `openlibrary`, `google`; `null` — вручную. */
+            source?: string | null;
+            /** @description Скачать и заменить обложку правки. Без него и без `reset_cover` обложка не меняется. */
+            cover_url?: string | null;
+            /** @description Убрать обложку правки. Вместе с `cover_url` — ошибка. */
+            reset_cover?: boolean;
         };
         MergeLibraryBooksRequest: {
             /**
@@ -2575,6 +2686,111 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            404: components["responses"]["LibraryNotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getLibraryBookMetadataCandidates: {
+        parameters: {
+            query?: {
+                q?: string;
+                /** @description ISBN-10 или ISBN-13, дефисы допустимы. */
+                isbn?: string;
+            };
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryBookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Кандидаты и состояние каталогов */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryMetadataCandidates"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["LibraryNotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
+    putLibraryBookMetadata: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryBookID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LibraryMetadataForm"];
+            };
+        };
+        responses: {
+            /** @description Книга после сохранения */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryBookDetail"];
+                };
+            };
+            /** @description `invalid_metadata`: значение вне ограничений, запрещённый адрес обложки, `cover_url` вместе с `reset_cover`; `bad_request`: неверное тело */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["LibraryNotFound"];
+            /** @description `cover_unavailable`: изображение не удалось скачать или декодировать, правки не изменились */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteLibraryBookMetadata: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryBookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Книга после сброса */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryBookDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
             404: components["responses"]["LibraryNotFound"];
             default: components["responses"]["Error"];
         };

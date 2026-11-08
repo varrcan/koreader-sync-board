@@ -1,0 +1,59 @@
+{
+ "content": null,
+ "copies": 37000,
+ "correct_level": 1.0,
+ "cover_type": "твёрдая",
+ "creators": {
+  "authors": [
+   {
+    "id": "1",
+    "is_opened": 1,
+    "name": "Дэн Симмонс",
+    "sex": 1,
+    "type": "autor"
+   }
+  ],
+  "compilers": null,
+  "publishers": [
+   {
+    "id": "33",
+    "name": "АСТ",
+    "type": "publisher"
+   }
+  ]
+ },
+ "description": "Первая часть романа-эпопеи, открывающего цикл <a href=\"/work92\">\"Песни Гипериона\"</a>.\r\nИллюстрация на обложке <a href=\"/art257\">М. Уэлана</a>; внутренние иллюстрации [art=1846:иллюстрации]С. Чайкуна[/art].",
+ "edition_id": 184,
+ "edition_name": "Гиперион",
+ "edition_type": "авторская книга",
+ "edition_type_plus": [
+  "первое издание"
+ ],
+ "edition_work_id": null,
+ "format": "84x108/32",
+ "format_mm": "130x200",
+ "image": "/images/editions/big/184?r=1575127844",
+ "image_preview": "/images/editions/small/184?r=1575127844",
+ "images_plus": null,
+ "isbns": [
+  "5-88196-387-3"
+ ],
+ "lang": "русский",
+ "lang_code": "ru",
+ "last_modified": "2023-07-27 18:47:51",
+ "notes": "1996 г. - доп. тираж 10000 экз.\r\n1997 г. - доп. тираж 5000 э",
+ "pages": 672,
+ "plan_date": "",
+ "plan_description": "",
+ "preread": 0,
+ "series": [
+  {
+   "id": "288",
+   "is_opened": 1,
+   "name": "Координаты чудес",
+   "type": "series"
+  }
+ ],
+ "type": 10,
+ "year": 1995
+}

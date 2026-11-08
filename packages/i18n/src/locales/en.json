@@ -319,7 +319,32 @@
       "mergeDescription": "Find the book to merge into this one. Its files move here and it disappears from the catalog.",
       "mergeConfirmText": "“{{from}}” will be merged into “{{into}}”. To undo, split the files back out.",
       "mergeConfirm": "Merge",
-      "mergeBack": "Back"
+      "mergeBack": "Back",
+      "description": "Description"
+    },
+    "metadata": {
+      "button": "Metadata",
+      "title": "Metadata for “{{title}}”",
+      "pickHint": "Pick a match to fill in the form; you can review it before saving.",
+      "formHint": "Review the values. An empty field hides the value from the file.",
+      "query": "Title, author",
+      "search": "Search",
+      "searching": "Searching…",
+      "badQuery": "Check the ISBN: it is not valid.",
+      "providerFailed": "Did not respond: {{names}}.",
+      "nothing": "Nothing found.",
+      "noTitle": "Untitled",
+      "fromFile": "From file",
+      "manual": "Manual",
+      "useCover": "Replace the cover",
+      "titleField": "Title",
+      "authors": "Authors",
+      "seriesIndex": "Number",
+      "description": "Description",
+      "save": "Save",
+      "reset": "Reset to file data",
+      "resetConfirm": "Remove edits",
+      "source": "Data: {{name}}"
     }
   },
   "errors": {
@@ -358,7 +383,9 @@
     "root_overlap": "The folder is inside an added folder or contains one.",
     "single_file": "This is the only file of the book: there is nothing to split off.",
     "file_unavailable": "The file is unavailable: its folder is offline or the file was removed.",
-    "library_not_found": "This is no longer in the library. Refresh the page."
+    "library_not_found": "This is no longer in the library. Refresh the page.",
+    "invalid_metadata": "Check the values: one of the fields is too long or invalid.",
+    "cover_unavailable": "Could not download the cover. Untick it or try again later."
   },
   "statistics": {
     "title": "Reading statistics",

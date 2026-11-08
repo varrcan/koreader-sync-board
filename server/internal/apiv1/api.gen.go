@@ -392,8 +392,8 @@ type HealthStatus string
 type LibraryBook struct {
 	Authors *string `json:"authors"`
 
-	// Cover Идентификатор миниатюры для `GET /api/v1/library/covers/{cover}`: обложка файла с
-	// наименьшим id среди файлов книги с обложкой. `null`, если обложки нет.
+	// Cover Идентификатор миниатюры для `GET /api/v1/library/covers/{cover}`: обложка правки, иначе
+	// файла с наименьшим id среди файлов книги с обложкой. `null`, если обложки нет.
 	Cover *string `json:"cover"`
 
 	// Filename Имя без каталогов файла с наименьшим id.
@@ -415,8 +415,21 @@ type LibraryBook struct {
 
 // LibraryBookDetail defines model for LibraryBookDetail.
 type LibraryBookDetail struct {
-	Book  LibraryBook   `json:"book"`
-	Files []LibraryFile `json:"files"`
+	Book LibraryBook `json:"book"`
+
+	// Description Аннотация из правки.
+	Description *string       `json:"description"`
+	Files       []LibraryFile `json:"files"`
+
+	// Metadata `null`, если правок нет.
+	Metadata *LibraryBookMetadataInfo `json:"metadata"`
+}
+
+// LibraryBookMetadataInfo defines model for LibraryBookMetadataInfo.
+type LibraryBookMetadataInfo struct {
+	// Source `file`, `fantlab`, `openlibrary`, `google`; `null` — вручную.
+	Source    *string   `json:"source"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // LibraryBookPage defines model for LibraryBookPage.
@@ -454,6 +467,67 @@ type LibraryFileProgress struct {
 	Hash       string    `json:"hash"`
 	Percentage float64   `json:"percentage"`
 	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+// LibraryMetadataCandidate defines model for LibraryMetadataCandidate.
+type LibraryMetadataCandidate struct {
+	Authors  *string `json:"authors"`
+	CoverUrl *string `json:"cover_url"`
+
+	// Description Простой текст, абзацы разделены пустой строкой.
+	Description *string `json:"description"`
+	Isbn        *string `json:"isbn"`
+	Language    *string `json:"language"`
+
+	// Match `file`, `isbn` или `text`.
+	Match string `json:"match"`
+
+	// Provider `file`, `fantlab`, `openlibrary` или `google`.
+	Provider    string   `json:"provider"`
+	Series      *string  `json:"series"`
+	SeriesIndex *float64 `json:"series_index"`
+	Title       *string  `json:"title"`
+	Url         *string  `json:"url"`
+	Year        *int     `json:"year"`
+}
+
+// LibraryMetadataCandidates defines model for LibraryMetadataCandidates.
+type LibraryMetadataCandidates struct {
+	// Isbn ISBN, по которому шёл поиск.
+	Isbn      *string                    `json:"isbn"`
+	Items     []LibraryMetadataCandidate `json:"items"`
+	Providers []LibraryMetadataProvider  `json:"providers"`
+
+	// Query Текст, по которому шёл поиск.
+	Query *string `json:"query"`
+}
+
+// LibraryMetadataForm Форма целиком. Отсутствующее или пустое поле означает, что значения нет.
+type LibraryMetadataForm struct {
+	Authors *string `json:"authors,omitempty"`
+
+	// CoverUrl Скачать и заменить обложку правки. Без него и без `reset_cover` обложка не меняется.
+	CoverUrl    *string `json:"cover_url,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Language    *string `json:"language,omitempty"`
+
+	// ResetCover Убрать обложку правки. Вместе с `cover_url` — ошибка.
+	ResetCover  *bool    `json:"reset_cover,omitempty"`
+	Series      *string  `json:"series,omitempty"`
+	SeriesIndex *float64 `json:"series_index,omitempty"`
+
+	// Source `file`, `fantlab`, `openlibrary`, `google`; `null` — вручную.
+	Source *string `json:"source,omitempty"`
+	Title  *string `json:"title,omitempty"`
+}
+
+// LibraryMetadataProvider defines model for LibraryMetadataProvider.
+type LibraryMetadataProvider struct {
+	// Id Example: fantlab
+	Id string `json:"id"`
+
+	// Status `ok` или `error`.
+	Status string `json:"status"`
 }
 
 // LibraryRoot defines model for LibraryRoot.
@@ -858,6 +932,14 @@ type ListLibraryBooksParams struct {
 	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
 }
 
+// GetLibraryBookMetadataCandidatesParams defines parameters for GetLibraryBookMetadataCandidates.
+type GetLibraryBookMetadataCandidatesParams struct {
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
+
+	// Isbn ISBN-10 или ISBN-13, дефисы допустимы.
+	Isbn *string `form:"isbn,omitempty" json:"isbn,omitempty"`
+}
+
 // GetStatisticsCalendarParams defines parameters for GetStatisticsCalendar.
 type GetStatisticsCalendarParams struct {
 	// Tz Часовой пояс IANA (`Europe/Moscow`, `UTC`), по которому считаются дни и часы.
@@ -898,6 +980,9 @@ type RenameDeviceJSONRequestBody = RenameDeviceRequest
 
 // MergeLibraryBooksJSONRequestBody defines body for MergeLibraryBooks for application/json ContentType.
 type MergeLibraryBooksJSONRequestBody = MergeLibraryBooksRequest
+
+// PutLibraryBookMetadataJSONRequestBody defines body for PutLibraryBookMetadata for application/json ContentType.
+type PutLibraryBookMetadataJSONRequestBody = LibraryMetadataForm
 
 // CreateLibraryRootJSONRequestBody defines body for CreateLibraryRoot for application/json ContentType.
 type CreateLibraryRootJSONRequestBody = CreateLibraryRootRequest
@@ -967,6 +1052,15 @@ type ServerInterface interface {
 	// MergeLibraryBooks Объединить книги
 	// (POST /api/v1/library/books/{id}/merge)
 	MergeLibraryBooks(w http.ResponseWriter, r *http.Request, id LibraryBookID)
+	// DeleteLibraryBookMetadata Сбросить правки метаданных
+	// (DELETE /api/v1/library/books/{id}/metadata)
+	DeleteLibraryBookMetadata(w http.ResponseWriter, r *http.Request, id LibraryBookID)
+	// PutLibraryBookMetadata Сохранить правку метаданных
+	// (PUT /api/v1/library/books/{id}/metadata)
+	PutLibraryBookMetadata(w http.ResponseWriter, r *http.Request, id LibraryBookID)
+	// GetLibraryBookMetadataCandidates Найти метаданные книги
+	// (GET /api/v1/library/books/{id}/metadata/candidates)
+	GetLibraryBookMetadataCandidates(w http.ResponseWriter, r *http.Request, id LibraryBookID, params GetLibraryBookMetadataCandidatesParams)
 	// GetLibraryCover Миниатюра обложки
 	// (GET /api/v1/library/covers/{cover})
 	GetLibraryCover(w http.ResponseWriter, r *http.Request, cover string)
@@ -1616,6 +1710,113 @@ func (siw *ServerInterfaceWrapper) MergeLibraryBooks(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteLibraryBookMetadata operation middleware
+func (siw *ServerInterfaceWrapper) DeleteLibraryBookMetadata(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id LibraryBookID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteLibraryBookMetadata(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutLibraryBookMetadata operation middleware
+func (siw *ServerInterfaceWrapper) PutLibraryBookMetadata(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id LibraryBookID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutLibraryBookMetadata(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLibraryBookMetadataCandidates operation middleware
+func (siw *ServerInterfaceWrapper) GetLibraryBookMetadataCandidates(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id LibraryBookID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetLibraryBookMetadataCandidatesParams
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "isbn" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "isbn", r.URL.Query(), &params.Isbn, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "isbn"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "isbn", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLibraryBookMetadataCandidates(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetLibraryCover operation middleware
 func (siw *ServerInterfaceWrapper) GetLibraryCover(w http.ResponseWriter, r *http.Request) {
 
@@ -2196,6 +2397,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/books", wrapper.ListLibraryBooks)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/books/{id}", wrapper.GetLibraryBook)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/books/{id}/merge", wrapper.MergeLibraryBooks)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/books/{id}/metadata/candidates", wrapper.GetLibraryBookMetadataCandidates)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/library/books/{id}/metadata", wrapper.DeleteLibraryBookMetadata)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/library/books/{id}/metadata", wrapper.PutLibraryBookMetadata)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/covers/{cover}", wrapper.GetLibraryCover)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/files/{id}/content", wrapper.GetLibraryFileContent)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/files/{id}/split", wrapper.SplitLibraryFile)

@@ -41,6 +41,10 @@ type Config struct {
 	// LibraryScanInterval — период скана библиотеки (KSB_LIBRARY_SCAN_INTERVAL,
 	// по умолчанию 6h); 0 — только вручную и при добавлении корня.
 	LibraryScanInterval time.Duration
+
+	// GoogleBooksAPIKey включает провайдера метаданных Google Books
+	// (KSB_GOOGLE_BOOKS_API_KEY); пусто — выключен.
+	GoogleBooksAPIKey string
 }
 
 // OIDC — настройки OIDC-провайдера панели.
@@ -123,6 +127,7 @@ func Load(getenv func(string) string) (Config, error) {
 			return Config{}, fmt.Errorf("KSB_LIBRARY_SCAN_INTERVAL: %w", err)
 		}
 	}
+	c.GoogleBooksAPIKey = getenv("KSB_GOOGLE_BOOKS_API_KEY")
 	return c, nil
 }
 

@@ -1,0 +1,28 @@
+{
+ "work_id": 569,
+ "work_name": "Пикник на обочине",
+ "work_name_orig": "",
+ "work_type": "Повесть",
+ "work_year": 1972,
+ "work_description": "Человеческое общество столкнулось с чрезвычайными обстоятельствами глобального масштаба. После посещения пришельцами Земли появились... Зоны. Однако общество не готово к \"подаркам\" пришельцев.",
+ "work_root_saga": [
+  {}
+ ],
+ "image": "/images/editions/big/143403?r=1660839885",
+ "image_preview": "/images/editions/small/143403?r=1660839885",
+ "lang_code": "ru",
+ "authors": [
+  {
+   "id": 52,
+   "is_opened": 1,
+   "name": "Аркадий и Борис Стругацкие",
+   "name_orig": "",
+   "pseudoname": null,
+   "real_name": null,
+   "role": "autor",
+   "sex": 1,
+   "subrole": "",
+   "type": "autor"
+  }
+ ]
+}

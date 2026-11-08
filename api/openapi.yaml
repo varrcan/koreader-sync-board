@@ -1029,6 +1029,110 @@ paths:
           $ref: "#/components/responses/LibraryNotFound"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/library/books/{id}/metadata/candidates:
+    parameters:
+      - $ref: "#/components/parameters/LibraryBookID"
+    get:
+      operationId: getLibraryBookMetadataCandidates
+      summary: Найти метаданные книги
+      description: |
+        Только администратору. Кандидаты из файлов книги и внешних каталогов. Без `q` и
+        `isbn` запрос строится сам: ISBN из файлов, текст из названия и авторов, иначе из
+        имени файла. Если передан хотя бы один параметр, поиск идёт только по переданному.
+        Сбой каталога отражается в `providers`, ответ остаётся 200.
+      tags: [library]
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 200
+        - name: isbn
+          in: query
+          schema:
+            type: string
+          description: ISBN-10 или ISBN-13, дефисы допустимы.
+      responses:
+        "200":
+          description: Кандидаты и состояние каталогов
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryMetadataCandidates"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/LibraryNotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/library/books/{id}/metadata:
+    parameters:
+      - $ref: "#/components/parameters/LibraryBookID"
+    put:
+      operationId: putLibraryBookMetadata
+      summary: Сохранить правку метаданных
+      description: |
+        Только администратору. Заменяет все правки книги: значение, совпавшее с данными
+        файла, не хранится, пустое — скрывает значение файла. При наличии правок все файлы
+        книги закрепляются за ней.
+      tags: [library]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LibraryMetadataForm"
+      responses:
+        "200":
+          description: Книга после сохранения
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryBookDetail"
+        "400":
+          description: "`invalid_metadata`: значение вне ограничений, запрещённый адрес обложки, `cover_url` вместе с `reset_cover`; `bad_request`: неверное тело"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/LibraryNotFound"
+        "502":
+          description: "`cover_unavailable`: изображение не удалось скачать или декодировать, правки не изменились"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteLibraryBookMetadata
+      summary: Сбросить правки метаданных
+      description: Только администратору. Удаляет все правки книги, включая обложку. Закрепление файлов остаётся.
+      tags: [library]
+      responses:
+        "200":
+          description: Книга после сброса
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryBookDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/LibraryNotFound"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/library/covers/{cover}:
     parameters:
       - name: cover
@@ -1392,8 +1496,8 @@ components:
           type: string
           nullable: true
           description: |
-            Идентификатор миниатюры для `GET /api/v1/library/covers/{cover}`: обложка файла с
-            наименьшим id среди файлов книги с обложкой. `null`, если обложки нет.
+            Идентификатор миниатюры для `GET /api/v1/library/covers/{cover}`: обложка правки, иначе
+            файла с наименьшим id среди файлов книги с обложкой. `null`, если обложки нет.
     LibraryBookPage:
       type: object
       required: [items, next_cursor]
@@ -1455,7 +1559,7 @@ components:
           nullable: true
     LibraryBookDetail:
       type: object
-      required: [book, files]
+      required: [book, files, description, metadata]
       properties:
         book:
           $ref: "#/components/schemas/LibraryBook"
@@ -1463,6 +1567,138 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/LibraryFile"
+        description:
+          type: string
+          nullable: true
+          description: Аннотация из правки.
+        metadata:
+          allOf:
+            - $ref: "#/components/schemas/LibraryBookMetadataInfo"
+          nullable: true
+          description: "`null`, если правок нет."
+    LibraryBookMetadataInfo:
+      type: object
+      required: [source, updated_at]
+      properties:
+        source:
+          type: string
+          nullable: true
+          description: "`file`, `fantlab`, `openlibrary`, `google`; `null` — вручную."
+        updated_at:
+          type: string
+          format: date-time
+    LibraryMetadataCandidates:
+      type: object
+      required: [query, isbn, items, providers]
+      properties:
+        query:
+          type: string
+          nullable: true
+          description: Текст, по которому шёл поиск.
+        isbn:
+          type: string
+          nullable: true
+          description: ISBN, по которому шёл поиск.
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryMetadataCandidate"
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryMetadataProvider"
+    LibraryMetadataProvider:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+          example: fantlab
+        status:
+          type: string
+          description: "`ok` или `error`."
+    LibraryMetadataCandidate:
+      type: object
+      required: [provider, match, title, authors, series, series_index, language, year, description, isbn, cover_url, url]
+      properties:
+        provider:
+          type: string
+          description: "`file`, `fantlab`, `openlibrary` или `google`."
+        match:
+          type: string
+          description: "`file`, `isbn` или `text`."
+        title:
+          type: string
+          nullable: true
+        authors:
+          type: string
+          nullable: true
+        series:
+          type: string
+          nullable: true
+        series_index:
+          type: number
+          format: double
+          nullable: true
+        language:
+          type: string
+          nullable: true
+        year:
+          type: integer
+          nullable: true
+        description:
+          type: string
+          nullable: true
+          description: Простой текст, абзацы разделены пустой строкой.
+        isbn:
+          type: string
+          nullable: true
+        cover_url:
+          type: string
+          nullable: true
+        url:
+          type: string
+          nullable: true
+    LibraryMetadataForm:
+      type: object
+      description: Форма целиком. Отсутствующее или пустое поле означает, что значения нет.
+      properties:
+        title:
+          type: string
+          nullable: true
+          maxLength: 500
+        authors:
+          type: string
+          nullable: true
+          maxLength: 1000
+        series:
+          type: string
+          nullable: true
+          maxLength: 500
+        series_index:
+          type: number
+          format: double
+          nullable: true
+          minimum: 0
+        language:
+          type: string
+          nullable: true
+          maxLength: 16
+        description:
+          type: string
+          nullable: true
+          maxLength: 20000
+        source:
+          type: string
+          nullable: true
+          description: "`file`, `fantlab`, `openlibrary`, `google`; `null` — вручную."
+        cover_url:
+          type: string
+          nullable: true
+          description: Скачать и заменить обложку правки. Без него и без `reset_cover` обложка не меняется.
+        reset_cover:
+          type: boolean
+          description: Убрать обложку правки. Вместе с `cover_url` — ошибка.
     MergeLibraryBooksRequest:
       type: object
       required: [book_id]

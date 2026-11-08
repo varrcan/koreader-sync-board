@@ -388,3 +388,62 @@ func TestCoverPassKeepsScanTimes(t *testing.T) {
 		t.Errorf("scanned_at after the pass: %v", s)
 	}
 }
+
+func TestCoverOfMetadataSurvivesCleanup(t *testing.T) {
+	e := newCoverEnv(t, nil)
+	e.addRoot(e.root)
+	e.put("a.epub", coverEPUB(t, red), t0)
+	e.scan()
+	id := e.bookOf("a.epub")
+	var edited string
+	err := e.covers.Attach(encodeJPEG(t, 20, 30, blue), func(cover string) error {
+		edited = cover
+		return e.st.SetMetadata(e.ctx, id, MetadataEdit{Cover: &cover})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.scan()
+	if got := e.thumbs(); len(got) != 2 {
+		t.Fatalf("thumbs %v", got)
+	}
+	if got := *e.detail(id).Book.Cover; got != edited {
+		t.Fatalf("cover %q, want the edited one", got)
+	}
+	if err := e.st.ClearMetadata(e.ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	e.scan()
+	if got := e.thumbs(); len(got) != 1 {
+		t.Fatalf("after clear: %v", got)
+	}
+}
+
+// Уборка не должна читать used, пока панель между сохранением файла и записью строки.
+func TestCoverSweepWaitsForAttach(t *testing.T) {
+	c := NewCovers(t.TempDir())
+	var read atomic.Bool
+	done := make(chan error, 1)
+	err := c.Attach([]byte("thumb"), func(id string) error {
+		go func() {
+			done <- c.sweep(func() (map[string]bool, error) {
+				read.Store(true)
+				return map[string]bool{id: true}, nil
+			})
+		}()
+		time.Sleep(50 * time.Millisecond)
+		if read.Load() {
+			t.Error("sweep read used before the row was written")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(c.dir); len(entries) != 1 {
+		t.Fatalf("entries %v", entries)
+	}
+}

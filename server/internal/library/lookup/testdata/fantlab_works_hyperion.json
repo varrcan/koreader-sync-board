@@ -1,0 +1,172 @@
+[
+ {
+  "work_id": 1,
+  "name": "Hyperion",
+  "rusname": "Гиперион",
+  "name_show_im": "роман",
+  "all_autor_rusname": "Дэн Симмонс",
+  "all_autor_name": "Dan Simmons",
+  "year": 1989,
+  "autor_id": 1
+ },
+ {
+  "work_id": 2,
+  "name": "The Fall of Hyperion",
+  "rusname": "Падение Гипериона",
+  "name_show_im": "роман",
+  "all_autor_rusname": "Дэн Симмонс",
+  "all_autor_name": "Dan Simmons",
+  "year": 1990,
+  "autor_id": 1
+ },
+ {
+  "work_id": 92,
+  "name": "Hyperion Cantos",
+  "rusname": "Песни Гипериона",
+  "name_show_im": "цикл",
+  "all_autor_rusname": "Дэн Симмонс",
+  "all_autor_name": "Dan Simmons",
+  "year": 1989,
+  "autor_id": 1
+ },
+ {
+  "work_id": 402728,
+  "name": "",
+  "rusname": "Песни Гипериона",
+  "name_show_im": "роман-эпопея",
+  "all_autor_rusname": "Дэн Симмонс",
+  "all_autor_name": "Dan Simmons",
+  "year": 0,
+  "autor_id": 1
+ },
+ {
+  "work_id": 546206,
+  "name": "Hyperion",
+  "rusname": "Гиперион",
+  "name_show_im": "роман",
+  "all_autor_rusname": "Фридрих Гёльдерлин",
+  "all_autor_name": "Friedrich Hölderlin",
+  "year": 1797,
+  "autor_id": 42359
+ },
+ {
+  "work_id": 429480,
+  "name": "Hyperion. A Fragment",
+  "rusname": "Гиперион. Отрывок",
+  "name_show_im": "поэма",
+  "all_autor_rusname": "Джон Китс",
+  "all_autor_name": "John Keats",
+  "year": 1820,
+  "autor_id": 9275
+ },
+ {
+  "work_id": 2276962,
+  "name": "",
+  "rusname": "Гиперион Малансура",
+  "name_show_im": "роман",
+  "all_autor_rusname": "Кейт Каму",
+  "all_autor_name": "",
+  "year": 0,
+  "autor_id": 174188
+ },
+ {
+  "work_id": 1031846,
+  "name": "",
+  "rusname": "Дэн Симмонс «Гиперион». «Падение Гипериона»",
+  "name_show_im": "рецензия",
+  "all_autor_rusname": "Виктор Никитин",
+  "all_autor_name": "",
+  "year": 2017,
+  "autor_id": 69504
+ },
+ {
+  "work_id": 1572576,
+  "name": "",
+  "rusname": "Рецензия на цикл Дэна Симмонса \"Гиперион\"",
+  "name_show_im": "рецензия",
+  "all_autor_rusname": "Станислав Шульга, Дмитрий Тарабанов",
+  "all_autor_name": "",
+  "year": 2019,
+  "autor_id": 9298
+ },
+ {
+  "work_id": 322131,
+  "name": "",
+  "rusname": "Рецензия на книги: Симмонс Д. Гиперион; Падение Гипериона; Эндимион",
+  "name_show_im": "рецензия",
+  "all_autor_rusname": "Максим Борисов",
+  "all_autor_name": "",
+  "year": 1996,
+  "autor_id": 5512
+ },
+ {
+  "work_id": 199891,
+  "name": "",
+  "rusname": "Сумма фантастики (рецензия на «Гиперион» Дэна Симмонса)",
+  "name_show_im": "рецензия",
+  "all_autor_rusname": "Станислав Шульга",
+  "all_autor_name": "",
+  "year": 2007,
+  "autor_id": 9298
+ },
+ {
+  "work_id": 1855916,
+  "name": "",
+  "rusname": "Серия \"Гиперион\" // Артур Сильвестри",
+  "name_show_im": "",
+  "all_autor_rusname": "Журнал",
+  "all_autor_name": "",
+  "year": 0,
+  "autor_id": 100
+ },
+ {
+  "work_id": 429481,
+  "name": "The Fall of Hyperion: A Dream",
+  "rusname": "Падение Гипериона",
+  "name_show_im": "поэма",
+  "all_autor_rusname": "Джон Китс",
+  "all_autor_name": "John Keats",
+  "year": 1856,
+  "autor_id": 9275
+ },
+ {
+  "work_id": 1050744,
+  "name": "",
+  "rusname": "«Гелиос, сын Гиперионов...»",
+  "name_show_im": "стихотворение",
+  "all_autor_rusname": "Стесихор",
+  "all_autor_name": "Στησίχορος",
+  "year": 0,
+  "autor_id": 79824
+ },
+ {
+  "work_id": 1712868,
+  "name": "",
+  "rusname": "Певец Гипериона. Книги Дэна Симмонса: от ИскИнов до вампиров",
+  "name_show_im": "статья",
+  "all_autor_rusname": "Борис Невский",
+  "all_autor_name": "",
+  "year": 2023,
+  "autor_id": 6189
+ },
+ {
+  "work_id": 828410,
+  "name": "[Hyperions Schicksalslied]",
+  "rusname": "[Песня судьбы Гипериона]",
+  "name_show_im": "стихотворение",
+  "all_autor_rusname": "Фридрих Гёльдерлин",
+  "all_autor_name": "Friedrich Hölderlin",
+  "year": 0,
+  "autor_id": 42359
+ },
+ {
+  "work_id": 417763,
+  "name": "",
+  "rusname": "Повесть поэта. Гимны Гипериона",
+  "name_show_im": "отрывок",
+  "all_autor_rusname": "Дэн Симмонс",
+  "all_autor_name": "Dan Simmons",
+  "year": 1989,
+  "autor_id": 1
+ }
+]

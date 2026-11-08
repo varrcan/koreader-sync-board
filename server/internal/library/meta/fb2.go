@@ -5,9 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"golang.org/x/text/encoding/htmlindex"
 )
+
+// annotationBreaks — элементы аннотации, конец которых завершает абзац.
+var annotationBreaks = map[string]bool{"p": true, "v": true, "subtitle": true, "text-author": true, "empty-line": true}
 
 // FB2 потоково разбирает <description><title-info> и прекращает чтение на
 // </description>: тело книги и binary не читаются. Кодировка — из XML-декларации.
@@ -22,11 +26,23 @@ func FB2(r io.Reader) (Book, error) {
 		text    []byte
 		author  map[string]string
 		authors []string
+		// Текст аннотации копится отдельно: text сбрасывается на каждом вложенном теге.
+		paragraph  []byte
+		paragraphs []string
 	)
+	endParagraph := func() {
+		if p := clean(string(paragraph)); p != "" {
+			paragraphs = append(paragraphs, p)
+		}
+		paragraph = paragraph[:0]
+	}
 	// inTitleInfo: путь <корень>/description/title-info/…; src-title-info и
 	// document-info тоже содержат book-title и author.
 	inTitleInfo := func() bool {
 		return len(stack) >= 3 && stack[1] == "description" && stack[2] == "title-info"
+	}
+	inAnnotation := func() bool {
+		return inTitleInfo() && len(stack) >= 4 && stack[3] == "annotation"
 	}
 	for {
 		tok, err := d.Token()
@@ -63,6 +79,9 @@ func FB2(r io.Reader) (Book, error) {
 			}
 		case xml.CharData:
 			text = append(text, t...)
+			if inAnnotation() {
+				paragraph = append(paragraph, t...)
+			}
 		case xml.EndElement:
 			// Нестрогий режим пропускает незакрытые теги: снимаем со стека до
 			// совпадающего имени, лишний закрывающий тег игнорируем.
@@ -74,8 +93,17 @@ func FB2(r io.Reader) (Book, error) {
 				continue
 			}
 			stack = stack[:i+1]
+			if inAnnotation() && (len(stack) == 4 || annotationBreaks[t.Name.Local]) {
+				endParagraph()
+			}
+			if len(stack) == 4 && stack[1] == "description" && stack[2] == "publish-info" &&
+				t.Name.Local == "isbn" && b.ISBN == "" {
+				b.ISBN = NormalizeISBN(string(text))
+			}
 			if inTitleInfo() {
 				switch {
+				case len(stack) == 4 && t.Name.Local == "annotation" && b.Description == "":
+					b.Description = strings.Join(paragraphs, "\n\n")
 				case len(stack) == 4 && t.Name.Local == "book-title" && b.Title == "":
 					b.Title = clean(string(text))
 				case len(stack) == 4 && t.Name.Local == "lang" && b.Language == "":

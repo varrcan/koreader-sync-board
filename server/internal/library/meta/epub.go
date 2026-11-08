@@ -20,12 +20,15 @@ func EPUB(name string) (Book, error) {
 		return Book{}, err
 	}
 	defer z.Close()
+	return epubArchive(&z.Reader)
+}
 
-	opf, err := opfPath(&z.Reader)
+func epubArchive(z *zip.Reader) (Book, error) {
+	opf, err := opfPath(z)
 	if err != nil {
 		return Book{}, err
 	}
-	data, err := readEntry(&z.Reader, opf, maxRead)
+	data, err := readEntry(z, opf, maxRead)
 	if err != nil {
 		return Book{}, err
 	}
@@ -99,6 +102,10 @@ func parseOPF(data []byte) (Book, error) {
 		cur      *opfCreator
 		curMeta  *opfMeta
 		seenMeta bool
+		scheme   string
+		isbn     string // явно объявленный ISBN
+		bare     string // значение без схемы, случайно похожее на ISBN, — запасной вариант
+		desc     *strings.Builder
 	)
 	for {
 		tok, err := d.Token()
@@ -119,9 +126,18 @@ func parseOPF(data []byte) (Book, error) {
 			depth++
 			text = text[:0]
 			if depth != 2 {
+				// HTML аннотации бывает разметкой, а не экранированным текстом:
+				// теги остаются в тексте, их разберёт PlainText.
+				if desc != nil {
+					desc.WriteString("<" + t.Name.Local + ">")
+				}
 				continue
 			}
 			switch t.Name.Local {
+			case "identifier":
+				scheme = attr(t, "scheme")
+			case "description":
+				desc = &strings.Builder{}
 			case "creator":
 				cur = &opfCreator{id: attr(t, "id"), role: attr(t, "role")}
 			case "meta":
@@ -132,6 +148,9 @@ func parseOPF(data []byte) (Book, error) {
 			if depth > 0 {
 				text = append(text, t...)
 			}
+			if desc != nil {
+				desc.Write(t)
+			}
 		case xml.EndElement:
 			if depth == 0 {
 				continue
@@ -140,9 +159,27 @@ func parseOPF(data []byte) (Book, error) {
 				depth = 0
 				continue
 			}
+			if depth > 2 && desc != nil {
+				desc.WriteString("</" + t.Name.Local + ">")
+			}
 			if depth == 2 {
 				v := clean(string(text))
 				switch t.Name.Local {
+				case "identifier":
+					switch n := NormalizeISBN(v); {
+					case n == "":
+					case strings.EqualFold(scheme, "isbn") || strings.HasPrefix(strings.ToLower(v), "urn:isbn:"):
+						if isbn == "" {
+							isbn = n
+						}
+					case scheme == "" && bare == "":
+						bare = n
+					}
+				case "description":
+					if desc != nil && b.Description == "" {
+						b.Description = PlainText(desc.String())
+					}
+					desc = nil
 				case "title":
 					if b.Title == "" {
 						b.Title = v
@@ -188,6 +225,10 @@ func parseOPF(data []byte) (Book, error) {
 		}
 	}
 	b.Series, b.SeriesIndex = opfSeries(metas)
+	b.ISBN = isbn
+	if b.ISBN == "" {
+		b.ISBN = bare
+	}
 	return b, nil
 }
 

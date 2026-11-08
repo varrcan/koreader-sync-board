@@ -1,0 +1,45 @@
+{
+ "numFound": 1,
+ "start": 0,
+ "numFoundExact": true,
+ "num_found": 1,
+ "documentation_url": "https://openlibrary.org/dev/docs/api/search",
+ "q": "isbn:9780553283686",
+ "offset": null,
+ "docs": [
+  {
+   "author_name": [
+    "Dan Simmons"
+   ],
+   "cover_i": 380332,
+   "first_publish_year": 1989,
+   "key": "/works/OL1963268W",
+   "series_name": [
+    "Hyperion Cantos"
+   ],
+   "series_position": [
+    "1"
+   ],
+   "title": "Hyperion",
+   "editions": {
+    "numFound": 4,
+    "start": 0,
+    "numFoundExact": true,
+    "docs": [
+     {
+      "key": "/books/OL24961127M",
+      "title": "Hyperion",
+      "cover_i": 15211746,
+      "language": [
+       "eng"
+      ],
+      "isbn": [
+       "9780553283686",
+       "0553283685"
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

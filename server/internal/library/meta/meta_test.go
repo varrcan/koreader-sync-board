@@ -3,6 +3,7 @@ package meta
 import (
 	"errors"
 	"io"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -24,6 +25,10 @@ func TestFB2Encodings(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
+		if !strings.HasPrefix(got.Description, "Зона") {
+			t.Errorf("%s: description %q", name, got.Description)
+		}
+		got.Description = ""
 		if !reflect.DeepEqual(got, piknikFB2) {
 			t.Errorf("%s:\n got %+v\nwant %+v", name, got, piknikFB2)
 		}
@@ -37,6 +42,7 @@ func TestFB2Zip(t *testing.T) {
 	}
 	want := piknikFB2
 	want.Authors = want.Authors[:2]
+	got.Description = ""
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
@@ -203,6 +209,155 @@ func TestFold(t *testing.T) {
 	} {
 		if got := Fold(in); got != want {
 			t.Errorf("Fold(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func fb2With(body string) string {
+	return `<?xml version="1.0" encoding="UTF-8"?><FictionBook><description>` + body + `</description></FictionBook>`
+}
+
+func TestFB2Annotation(t *testing.T) {
+	got, err := FB2(strings.NewReader(fb2With(`<title-info><book-title>T</book-title>
+		<annotation><p>Первый <emphasis>важный</emphasis> абзац.</p><empty-line/>
+		<p>Второй
+		   <strong>абзац</strong>.</p><poem><stanza><v>Строка</v></stanza></poem></annotation></title-info>`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "Первый важный абзац.\n\nВторой абзац.\n\nСтрока"; got.Description != want {
+		t.Errorf("got %q, want %q", got.Description, want)
+	}
+	if got.Title != "T" {
+		t.Errorf("title %q", got.Title)
+	}
+}
+
+func TestFB2ISBN(t *testing.T) {
+	for in, want := range map[string]string{
+		"978-5-17-088647-0":      "9785170886470",
+		"ISBN 978-5-17-088647-0": "9785170886470",
+		"123":                    "",
+		"9785170886471":          "",
+	} {
+		got, err := FB2(strings.NewReader(fb2With(`<title-info/><publish-info><isbn>` + in + `</isbn></publish-info>`)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ISBN != want {
+			t.Errorf("%q: got %q, want %q", in, got.ISBN, want)
+		}
+	}
+}
+
+// Абзац src-title-info с тем же тегом не должен попадать в аннотацию.
+func TestFB2AnnotationOnlyFromTitleInfo(t *testing.T) {
+	got, err := FB2(strings.NewReader(fb2With(
+		`<src-title-info><annotation><p>Оригинал</p></annotation></src-title-info>`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Description != "" {
+		t.Errorf("got %q", got.Description)
+	}
+}
+
+func opf(body string) []byte {
+	return []byte(`<package><metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="x">` + body + `</metadata></package>`)
+}
+
+func TestOPFISBN(t *testing.T) {
+	for name, tt := range map[string]struct{ body, want string }{
+		"схема":        {`<dc:identifier opf:scheme="ISBN">978-5-17-088647-0</dc:identifier>`, "9785170886470"},
+		"urn":          {`<dc:identifier>urn:isbn:9785170886470</dc:identifier>`, "9785170886470"},
+		"голое":        {`<dc:identifier>9785170886470</dc:identifier>`, "9785170886470"},
+		"мусор":        {`<dc:identifier>urn:uuid:123</dc:identifier>`, ""},
+		"чужая схема":  {`<dc:identifier opf:scheme="calibre">9785170886470</dc:identifier>`, ""},
+		"явный важнее": {`<dc:identifier>0306406152</dc:identifier><dc:identifier>urn:isbn:9785170886470</dc:identifier>`, "9785170886470"},
+	} {
+		got, err := parseOPF(opf(tt.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.ISBN != tt.want {
+			t.Errorf("%s: got %q, want %q", name, got.ISBN, tt.want)
+		}
+	}
+}
+
+func TestOPFDescription(t *testing.T) {
+	for name, tt := range map[string]struct{ body, want string }{
+		"экранированный HTML": {`<dc:description>&lt;p&gt;Один &amp;amp; два&lt;/p&gt;&lt;p&gt;Три&lt;/p&gt;</dc:description>`, "Один & два\n\nТри"},
+		"разметка":            {`<dc:description><p>Один <b>два</b></p><p>Три</p></dc:description>`, "Один два\n\nТри"},
+		"текст":               {`<dc:description>Просто текст</dc:description>`, "Просто текст"},
+	} {
+		got, err := parseOPF(opf(`<dc:title>T</dc:title>` + tt.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.Description != tt.want || got.Title != "T" {
+			t.Errorf("%s: got %q (title %q), want %q", name, got.Description, got.Title, tt.want)
+		}
+	}
+}
+
+func TestNormalizeISBN(t *testing.T) {
+	for in, want := range map[string]string{
+		"978-5-17-088647-0":   "9785170886470",
+		"urn:isbn:0306406152": "0306406152",
+		"isbn: 0-8044-2957-X": "080442957X",
+		"080442957x":          "080442957X",
+		"X804429575":          "",
+		"978–5–17–088647–0":   "9785170886470",
+		"4006381333931":       "",
+		"abc9785170886470":    "",
+		"":                    "",
+	} {
+		if got := NormalizeISBN(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestPlainText(t *testing.T) {
+	for in, want := range map[string]string{
+		"<p>Один</p><p>Два &mdash; три</p>":  "Один\n\nДва — три",
+		"Один<br/>Два<BR>Три":                "Один\n\nДва\n\nТри",
+		"a < b и c > d":                      "a < b и c > d",
+		"<b>жирный</b>\nпродолжение<p>x</p>": "жирный продолжение\n\nx",
+		"строка 1\r\nстрока 2\n\nстрока 3":   "строка 1\n\nстрока 2\n\nстрока 3",
+		"  ":                       "",
+		"<!-- c --><span>x</span>": "x",
+	} {
+		if got := PlainText(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestParseAtMatchesParse(t *testing.T) {
+	for name, format := range map[string]string{
+		"epub2.epub": "epub", "piknik.fb2.zip": "fb2.zip", "utf8-bom.fb2": "fb2",
+	} {
+		f, err := os.Open("testdata/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		fi, err := f.Stat()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := ParseAt(f, fi.Size(), format)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		want, err := Parse("testdata/"+name, format)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s:\n got %+v\nwant %+v", name, got, want)
 		}
 	}
 }

@@ -261,6 +261,29 @@ the files and directories.
 - **NFS**: mount with `soft` and a `timeo`: on a hard mount a dead server blocks the scan until
   it comes back, and other folders are not scanned meanwhile.
 
+### Book metadata
+
+An administrator can correct a library book with **Metadata** on its page: pick a match found
+in the book's files or in an online catalog, review the form and save, or fill the form by hand.
+Edits are stored in the database, on top of what the files say: the files are never changed, and
+a rescan does not overwrite them. An empty field hides the value from the file. A field equal
+to the file's value is not stored, so it keeps following the file. **Reset to file data** removes all
+edits of the book.
+
+- **Catalogs**: FantLab and Open Library work without configuration. Google Books is enabled by
+  `KSB_GOOGLE_BOOKS_API_KEY`. The search looks up the ISBN from the book's files first, then the
+  title and authors.
+- **Network**: the server contacts catalogs only when an administrator opens the dialog or
+  searches. It needs outbound HTTPS to `api.fantlab.ru`, `fantlab.ru`, `openlibrary.org`,
+  `covers.openlibrary.org`, `archive.org` and its subdomains and, with a key, `www.googleapis.com`,
+  `books.google.com` and `*.googleusercontent.com`. If a catalog is unreachable, the dialog says
+  so and shows the others.
+- **Cache**: FantLab and Open Library answers are kept in the database for 7 days. Google Books
+  answers are not cached.
+- **Google Books terms**: saving a Google Books match stores its data in your database for as long
+  as the edit exists. Complying with the
+  [Google APIs Terms of Service](https://developers.google.com/terms) is up to the owner of the key.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -271,6 +294,7 @@ the files and directories.
 | `KSB_KOSYNC_SELF_DELETE` | `false` | Allow deleting an account from the device (`DELETE /users/me`) |
 | `KSB_TRUSTED_PROXIES` | — | Reverse proxies whose `X-Forwarded-For` is trusted: CIDRs or single addresses, comma-separated (see below) |
 | `ADMIN_USER`, `ADMIN_PASSWORD` | — | Create an admin with a panel password on first start (empty database only). Set both or neither; the password needs at least 8 characters |
+| `KSB_GOOGLE_BOOKS_API_KEY` | — | Enables Google Books as a metadata catalog; the key is never logged |
 | `KSB_OIDC_ISSUER` | — | OIDC provider URL; enables OIDC together with `KSB_OIDC_CLIENT_ID` and `KSB_PUBLIC_URL` |
 | `KSB_OIDC_CLIENT_ID` | — | Client ID at the provider |
 | `KSB_OIDC_CLIENT_SECRET` | — | Client secret; empty for a public client with PKCE only |

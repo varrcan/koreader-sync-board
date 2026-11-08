@@ -18,6 +18,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/config"
 	"github.com/varrcan/koreader-sync-board/server/internal/kosync"
 	"github.com/varrcan/koreader-sync-board/server/internal/library"
+	"github.com/varrcan/koreader-sync-board/server/internal/library/lookup"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
@@ -90,9 +91,12 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 			Setup:      setup,
 			Progress:   prog,
 			Statistics: stats,
-			Library:    apiv1.Library{Store: lib, Scanner: scanner, Covers: covers},
-			Log:        log,
-			SSO:        provider,
+			Library: apiv1.Library{
+				Store: lib, Scanner: scanner, Covers: covers, Files: library.NewFileReader(),
+				Lookup: lookup.New(db, cfg.GoogleBooksAPIKey, log), CoverSource: lookup.NewCoverFetcher(),
+			},
+			Log: log,
+			SSO: provider,
 
 			PasswordLoginUnlinkedOnly: !cfg.PanelPasswordLogin,
 		}),
@@ -120,7 +124,7 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	log.Info("server started", "listen", cfg.Listen, "data_dir", cfg.DataDir,
 		"version", buildinfo.Version, "kosync_registration", cfg.KosyncRegistration,
 		"kosync_self_delete", cfg.KosyncSelfDelete, "trusted_proxies", fmt.Sprint(cfg.TrustedProxies),
-		"library_scan_interval", cfg.LibraryScanInterval)
+		"library_scan_interval", cfg.LibraryScanInterval, "google_books", cfg.GoogleBooksAPIKey != "")
 
 	select {
 	case err := <-errc:

@@ -703,6 +703,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/covers/{cover}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Значение поля `cover` книги. */
+                cover: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Миниатюра обложки
+         * @description JPEG, вписанный в 384×576. Адрес неизменяем, поэтому ответ кешируется браузером надолго.
+         *     Доступно любому пользователю.
+         */
+        get: operations["getLibraryCover"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/files/{id}/content": {
         parameters: {
             query?: never;
@@ -821,6 +845,11 @@ export interface components {
             formats: string[];
             /** @description Имя без каталогов файла с наименьшим id. */
             filename: string;
+            /**
+             * @description Идентификатор миниатюры для `GET /api/v1/library/covers/{cover}`: обложка файла с
+             *     наименьшим id среди файлов книги с обложкой. `null`, если обложки нет.
+             */
+            cover: string | null;
         };
         LibraryBookPage: {
             items: components["schemas"]["LibraryBook"][];
@@ -1033,6 +1062,8 @@ export interface components {
              * @description Книга библиотеки, которой принадлежит файл с этим хешем; `null`, если файла нет.
              */
             library_book_id: number | null;
+            /** @description Миниатюра этой книги библиотеки (`LibraryBook.cover`); `null`, если её нет. */
+            cover: string | null;
         };
         BookCounts: {
             all: number;
@@ -2544,6 +2575,39 @@ export interface operations {
                     "application/json": components["schemas"]["Error"];
                 };
             };
+            404: components["responses"]["LibraryNotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getLibraryCover: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Значение поля `cover` книги. */
+                cover: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Миниатюра */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": Blob;
+                };
+            };
+            /** @description Совпал `If-None-Match` */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
             404: components["responses"]["LibraryNotFound"];
             default: components["responses"]["Error"];
         };

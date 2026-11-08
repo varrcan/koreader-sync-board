@@ -38,6 +38,7 @@ var contentTypes = map[string]string{
 type Library struct {
 	Store   *library.Store
 	Scanner *library.Scanner
+	Covers  *library.Covers
 }
 
 func (s *Server) GetLibrary(w http.ResponseWriter, r *http.Request) {
@@ -226,6 +227,27 @@ func (s *Server) writeLibraryBook(w http.ResponseWriter, r *http.Request, status
 	writeJSON(w, status, out)
 }
 
+// GetLibraryCover отдаёт миниатюру. Имя — хеш содержимого, поэтому кеш вечный;
+// private обязателен: запрос идёт с cookie сессии.
+func (s *Server) GetLibraryCover(w http.ResponseWriter, r *http.Request, cover string) {
+	f, err := s.Library.Covers.Open(cover)
+	switch {
+	case errors.Is(err, library.ErrCoverNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "cover not found")
+		return
+	case err != nil:
+		s.internal(w, "open library cover", err)
+		return
+	}
+	defer f.Close()
+	h := w.Header()
+	h.Set("Content-Type", "image/jpeg")
+	h.Set("ETag", `"`+cover+`"`)
+	h.Set("Cache-Control", "private, max-age=31536000, immutable")
+	h.Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, "", time.Time{}, f)
+}
+
 // GetLibraryFileContent отдаёт файл с диска. os.OpenInRoot не выпускает за корень
 // ни через «..», ни через симлинк, подменённый после скана.
 func (s *Server) GetLibraryFileContent(w http.ResponseWriter, r *http.Request, id LibraryFileID) {
@@ -303,7 +325,7 @@ func libraryRoot(r library.Root) LibraryRoot {
 func libraryBook(b library.Book) LibraryBook {
 	return LibraryBook{
 		Id: b.ID, Title: b.Title, Authors: b.Authors, Series: b.Series, SeriesIndex: b.SeriesIndex,
-		Language: b.Language, Files: b.Files, Formats: b.Formats, Filename: b.Filename,
+		Language: b.Language, Files: b.Files, Formats: b.Formats, Filename: b.Filename, Cover: b.Cover,
 	}
 }
 

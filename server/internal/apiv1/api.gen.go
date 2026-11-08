@@ -192,6 +192,9 @@ type Book struct {
 	// Authors Из тех же источников и в том же порядке, что `title`.
 	Authors *string `json:"authors"`
 
+	// Cover Миниатюра этой книги библиотеки (`LibraryBook.cover`); `null`, если её нет.
+	Cover *string `json:"cover"`
+
 	// DeviceName Имя устройства последней синхронизации в панели; `null`, если устройство удалено.
 	DeviceName *string `json:"device_name"`
 
@@ -388,6 +391,10 @@ type HealthStatus string
 // LibraryBook defines model for LibraryBook.
 type LibraryBook struct {
 	Authors *string `json:"authors"`
+
+	// Cover Идентификатор миниатюры для `GET /api/v1/library/covers/{cover}`: обложка файла с
+	// наименьшим id среди файлов книги с обложкой. `null`, если обложки нет.
+	Cover *string `json:"cover"`
 
 	// Filename Имя без каталогов файла с наименьшим id.
 	Filename string `json:"filename"`
@@ -960,6 +967,9 @@ type ServerInterface interface {
 	// MergeLibraryBooks Объединить книги
 	// (POST /api/v1/library/books/{id}/merge)
 	MergeLibraryBooks(w http.ResponseWriter, r *http.Request, id LibraryBookID)
+	// GetLibraryCover Миниатюра обложки
+	// (GET /api/v1/library/covers/{cover})
+	GetLibraryCover(w http.ResponseWriter, r *http.Request, cover string)
 	// GetLibraryFileContent Скачать файл
 	// (GET /api/v1/library/files/{id}/content)
 	GetLibraryFileContent(w http.ResponseWriter, r *http.Request, id LibraryFileID)
@@ -1606,6 +1616,32 @@ func (siw *ServerInterfaceWrapper) MergeLibraryBooks(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetLibraryCover operation middleware
+func (siw *ServerInterfaceWrapper) GetLibraryCover(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "cover" -------------
+	var cover string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "cover", r.PathValue("cover"), &cover, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cover", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLibraryCover(w, r, cover)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetLibraryFileContent operation middleware
 func (siw *ServerInterfaceWrapper) GetLibraryFileContent(w http.ResponseWriter, r *http.Request) {
 
@@ -2160,6 +2196,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/books", wrapper.ListLibraryBooks)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/books/{id}", wrapper.GetLibraryBook)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/books/{id}/merge", wrapper.MergeLibraryBooks)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/covers/{cover}", wrapper.GetLibraryCover)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/files/{id}/content", wrapper.GetLibraryFileContent)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/files/{id}/split", wrapper.SplitLibraryFile)
 

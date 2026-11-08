@@ -30,7 +30,8 @@ func init() {
 }
 
 // Book — книга библиотеки. Formats — различные форматы файлов в порядке их id,
-// Filename — имя без каталогов файла с наименьшим id.
+// Filename — имя без каталогов файла с наименьшим id, Cover — миниатюра первого
+// файла с обложкой.
 type Book struct {
 	ID                     int64
 	Title, Authors, Series *string
@@ -39,6 +40,7 @@ type Book struct {
 	Files                  int
 	Formats                []string
 	Filename               string
+	Cover                  *string
 }
 
 // BookPage — страница каталога. Next — курсор следующей страницы, 0 на последней.
@@ -175,7 +177,7 @@ func queryBooks(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]B
 	return books, rows.Err()
 }
 
-// fillFiles заполняет Files, Formats и Filename одним запросом на все книги.
+// fillFiles заполняет Files, Formats, Filename и Cover одним запросом на все книги.
 func fillFiles(ctx context.Context, tx *sql.Tx, books []Book) error {
 	if len(books) == 0 {
 		return nil
@@ -190,7 +192,7 @@ func fillFiles(ctx context.Context, tx *sql.Tx, books []Book) error {
 	if err != nil {
 		return err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT book_id, path, format FROM library_files
+	rows, err := tx.QueryContext(ctx, `SELECT book_id, path, format, cover FROM library_files
 		WHERE book_id IN (SELECT value FROM json_each(?)) ORDER BY id`, string(list))
 	if err != nil {
 		return err
@@ -200,11 +202,15 @@ func fillFiles(ctx context.Context, tx *sql.Tx, books []Book) error {
 		var (
 			id           int64
 			file, format string
+			cover        sql.NullString
 		)
-		if err := rows.Scan(&id, &file, &format); err != nil {
+		if err := rows.Scan(&id, &file, &format, &cover); err != nil {
 			return err
 		}
 		b := index[id]
+		if b.Cover == nil {
+			b.Cover = nullable(cover)
+		}
 		if b.Files == 0 {
 			b.Filename = path.Base(file)
 		}

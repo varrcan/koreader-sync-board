@@ -14,17 +14,7 @@ import (
 // encoding/xml читает декларацию как ASCII до CharsetReader, поэтому UTF-16 не
 // поддерживается: такой файл останется без метаданных.
 func FB2(r io.Reader) (Book, error) {
-	d := xml.NewDecoder(limit(stripBOM(r)))
-	// FB2 из сети часто с &nbsp; и мелкими огрехами разметки.
-	d.Strict = false
-	d.Entity = xml.HTMLEntity
-	d.CharsetReader = func(label string, input io.Reader) (io.Reader, error) {
-		enc, err := htmlindex.Get(label)
-		if err != nil {
-			return nil, fmt.Errorf("unsupported encoding %q", label)
-		}
-		return enc.NewDecoder().Reader(input), nil
-	}
+	d := newXMLDecoder(limit(stripBOM(r), maxRead))
 
 	var (
 		b       Book
@@ -106,6 +96,22 @@ func FB2(r io.Reader) (Book, error) {
 			}
 		}
 	}
+}
+
+// newXMLDecoder — декодер для файлов из сети: в них часто &nbsp;, мелкие огрехи
+// разметки и кодировки не из UTF-8.
+func newXMLDecoder(r io.Reader) *xml.Decoder {
+	d := xml.NewDecoder(r)
+	d.Strict = false
+	d.Entity = xml.HTMLEntity
+	d.CharsetReader = func(label string, input io.Reader) (io.Reader, error) {
+		enc, err := htmlindex.Get(label)
+		if err != nil {
+			return nil, fmt.Errorf("unsupported encoding %q", label)
+		}
+		return enc.NewDecoder().Reader(input), nil
+	}
+	return d
 }
 
 // authorName — «Имя Отчество Фамилия», а без них — nickname.

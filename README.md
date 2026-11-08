@@ -250,6 +250,11 @@ the files and directories.
 - **Scanning** runs on start, every `KSB_LIBRARY_SCAN_INTERVAL` (6 hours by default), after a
   folder is added and with the **Scan** button. Unchanged files (same size and modification
   time) are not read again.
+- **Covers**: after walking the folders, the scanner reads the cover of each FB2, FB2.ZIP and
+  EPUB file once (and again when the file changes) and keeps a JPEG thumbnail in `covers/`
+  inside the data directory; nothing is written to the book folders. Other formats and books
+  without a cover get a generated one. With `KSB_LIBRARY_SCAN_INTERVAL=0`, books indexed before
+  covers appeared get them on the next manual scan.
 - **Unavailable storage**: if a folder cannot be read or is suddenly empty (an unmounted NAS),
   its index is kept and the panel shows the error. To clear the index of a folder emptied on
   purpose, delete the folder in the panel.
@@ -261,7 +266,7 @@ the files and directories.
 | Variable | Default | Meaning |
 |---|---|---|
 | `KSB_LISTEN` | `:8080` | Listen address |
-| `KSB_DATA_DIR` | `/data` | Data directory (SQLite database `ksb.sqlite3`) |
+| `KSB_DATA_DIR` | `/data` | Data directory (SQLite database `ksb.sqlite3`, cover thumbnails in `covers/`) |
 | `KSB_KOSYNC_REGISTRATION` | `false` | Allow creating accounts from KOReader (`POST /users/create`) |
 | `KSB_KOSYNC_SELF_DELETE` | `false` | Allow deleting an account from the device (`DELETE /users/me`) |
 | `KSB_TRUSTED_PROXIES` | — | Reverse proxies whose `X-Forwarded-For` is trusted: CIDRs or single addresses, comma-separated (see below) |

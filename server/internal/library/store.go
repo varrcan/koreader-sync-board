@@ -328,7 +328,7 @@ func (s *Store) apply(ctx context.Context, rootID int64, cs []change) error {
 			_, err = tx.ExecContext(ctx, `
 				UPDATE library_files SET size = ?, mtime_ns = ?, format = ?, partial_md5 = ?, book_id = ?,
 					title = nullif(?, ''), authors = nullif(?, ''), series = nullif(?, ''), series_index = ?,
-					language = nullif(?, ''), meta_error = nullif(?, ''), indexed_at = ?
+					language = nullif(?, ''), meta_error = nullif(?, ''), indexed_at = ?, cover_checked = 0
 				WHERE id = ?`, append(args, id)...)
 		}
 		if err != nil {
@@ -443,6 +443,61 @@ func refreshBooks(ctx context.Context, tx *sql.Tx, ids []int64) error {
 		DELETE FROM library_books WHERE id IN (SELECT value FROM json_each(?))
 			AND NOT EXISTS (SELECT 1 FROM library_files f WHERE f.book_id = library_books.id)`, string(list))
 	return err
+}
+
+// coverFile — файл, обложку которого предстоит проверить.
+type coverFile struct {
+	id                 int64
+	root, path, format string
+}
+
+// uncheckedCovers — страница файлов с непроверенной обложкой. Форматы отбираются
+// здесь, поэтому файлы остальных форматов не открываются.
+func (s *Store) uncheckedCovers(ctx context.Context, after int64, limit int) ([]coverFile, error) {
+	rows, err := s.db.Read.QueryContext(ctx, `
+		SELECT f.id, r.path, f.path, f.format
+		FROM library_files f JOIN library_roots r ON r.id = f.root_id
+		WHERE f.cover_checked = 0 AND f.format IN ('epub', 'fb2', 'fb2.zip') AND f.id > ?
+		ORDER BY f.id LIMIT ?`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []coverFile
+	for rows.Next() {
+		var f coverFile
+		if err := rows.Scan(&f.id, &f.root, &f.path, &f.format); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// setCover записывает итог проверки; cover == "" — обложки нет. По одному файлу:
+// писатель в SQLite один, kosync не должен ждать пакет.
+func (s *Store) setCover(ctx context.Context, id int64, cover string) error {
+	_, err := s.db.Write.ExecContext(ctx,
+		`UPDATE library_files SET cover = nullif(?, ''), cover_checked = 1 WHERE id = ?`, cover, id)
+	return err
+}
+
+// usedCovers — миниатюры, на которые ссылается индекс.
+func (s *Store) usedCovers(ctx context.Context) (map[string]bool, error) {
+	rows, err := s.db.Read.QueryContext(ctx, `SELECT DISTINCT cover FROM library_files WHERE cover IS NOT NULL`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	used := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		used[id] = true
+	}
+	return used, rows.Err()
 }
 
 // finishRoot записывает итог скана корня; msg == "" — успех.

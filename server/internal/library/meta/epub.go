@@ -21,9 +21,22 @@ func EPUB(name string) (Book, error) {
 	}
 	defer z.Close()
 
-	data, err := readEntry(&z.Reader, "META-INF/container.xml")
+	opf, err := opfPath(&z.Reader)
 	if err != nil {
 		return Book{}, err
+	}
+	data, err := readEntry(&z.Reader, opf, maxRead)
+	if err != nil {
+		return Book{}, err
+	}
+	return parseOPF(data)
+}
+
+// opfPath — путь OPF в архиве из META-INF/container.xml.
+func opfPath(z *zip.Reader) (string, error) {
+	data, err := readEntry(z, "META-INF/container.xml", maxRead)
+	if err != nil {
+		return "", err
 	}
 	var c struct {
 		Rootfiles []struct {
@@ -31,23 +44,20 @@ func EPUB(name string) (Book, error) {
 		} `xml:"rootfiles>rootfile"`
 	}
 	if err := xml.Unmarshal(data, &c); err != nil {
-		return Book{}, fmt.Errorf("container.xml: %w", err)
+		return "", fmt.Errorf("container.xml: %w", err)
 	}
 	if len(c.Rootfiles) == 0 || c.Rootfiles[0].FullPath == "" {
-		return Book{}, errors.New("container.xml: no rootfile")
+		return "", errors.New("container.xml: no rootfile")
 	}
-	if data, err = readEntry(&z.Reader, strings.TrimPrefix(path.Clean(c.Rootfiles[0].FullPath), "/")); err != nil {
-		return Book{}, err
-	}
-	return parseOPF(data)
+	return strings.TrimPrefix(path.Clean(c.Rootfiles[0].FullPath), "/"), nil
 }
 
-func readEntry(z *zip.Reader, name string) ([]byte, error) {
+func readEntry(z *zip.Reader, name string, maxBytes int64) ([]byte, error) {
 	for _, f := range z.File {
 		if f.Name != name {
 			continue
 		}
-		if f.UncompressedSize64 > maxRead {
+		if f.UncompressedSize64 > uint64(maxBytes) {
 			return nil, fmt.Errorf("%s: %w", name, ErrTooLarge)
 		}
 		r, err := f.Open()
@@ -55,7 +65,7 @@ func readEntry(z *zip.Reader, name string) ([]byte, error) {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}
 		defer r.Close()
-		b, err := readAll(r)
+		b, err := readAll(r, maxBytes)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", name, err)
 		}

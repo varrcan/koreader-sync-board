@@ -1,5 +1,5 @@
 import { CircleHelp } from "lucide-react";
-import type { CSSProperties } from "react";
+import { type CSSProperties, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { displayTitle, formatPercent, isUnknown, shortHash } from "@/lib/books";
 import { cn } from "@/lib/utils";
@@ -32,6 +32,7 @@ type CoverBook = {
   authors: string | null;
   filename: string | null;
   percentage?: number;
+  cover?: string | null;
 };
 
 // Цвет — от «название + авторы», а не от хеша: одна книга в FB2 и EPUB получает
@@ -43,6 +44,23 @@ function paletteIndex(key: string): number {
 }
 
 const shadow = "0 1px 2px oklch(0 0 0 / .25), 0 2px 8px oklch(0 0 0 / .12)";
+
+// Лежит поверх сгенерированной обложки, поэтому пока картинка грузится или если
+// она не загрузилась, видна сгенерированная.
+function CoverImage({ cover }: { cover: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <img
+      src={`/api/v1/library/covers/${cover}`}
+      alt=""
+      loading="lazy"
+      decoding="async"
+      className="absolute inset-0 size-full object-cover"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 export function BookCover({ book, size, className }: { book: CoverBook; size: CoverSize; className?: string }) {
   const { i18n } = useTranslation();
@@ -103,13 +121,6 @@ export function BookCover({ book, size, className }: { book: CoverBook; size: Co
         color: isLight ? `oklch(0.26 0.04 ${hue})` : `oklch(0.94 0.025 ${hue})`,
       }}
     >
-      <div
-        className="absolute inset-y-0 left-0"
-        style={{
-          width: dim.spine,
-          background: "linear-gradient(90deg, oklch(0 0 0 / .28), oklch(0 0 0 / .08) 70%, oklch(1 0 0 / .06))",
-        }}
-      />
       {small ? (
         <div className="m-auto pl-[3px] font-serif text-xl leading-none font-semibold">
           {title.trim().charAt(0).toUpperCase() || "?"}
@@ -138,6 +149,15 @@ export function BookCover({ book, size, className }: { book: CoverBook; size: Co
           </div>
         </>
       )}
+      {/* После текста: его блоки с opacity образуют слои и иначе рисуются поверх картинки. */}
+      {book.cover && <CoverImage key={book.cover} cover={book.cover} />}
+      <div
+        className="absolute inset-y-0 left-0"
+        style={{
+          width: dim.spine,
+          background: "linear-gradient(90deg, oklch(0 0 0 / .28), oklch(0 0 0 / .08) 70%, oklch(1 0 0 / .06))",
+        }}
+      />
     </div>
   );
 }

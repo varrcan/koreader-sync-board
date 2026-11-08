@@ -1029,6 +1029,38 @@ paths:
           $ref: "#/components/responses/LibraryNotFound"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/library/covers/{cover}:
+    parameters:
+      - name: cover
+        in: path
+        required: true
+        description: Значение поля `cover` книги.
+        schema:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+    get:
+      operationId: getLibraryCover
+      summary: Миниатюра обложки
+      description: |
+        JPEG, вписанный в 384×576. Адрес неизменяем, поэтому ответ кешируется браузером надолго.
+        Доступно любому пользователю.
+      tags: [library]
+      responses:
+        "200":
+          description: Миниатюра
+          content:
+            image/jpeg:
+              schema:
+                type: string
+                format: binary
+        "304":
+          description: Совпал `If-None-Match`
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/LibraryNotFound"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/library/files/{id}/content:
     parameters:
       - $ref: "#/components/parameters/LibraryFileID"
@@ -1323,7 +1355,7 @@ components:
           description: Пустое или отсутствующее — последний элемент пути.
     LibraryBook:
       type: object
-      required: [id, title, authors, series, series_index, language, files, formats, filename]
+      required: [id, title, authors, series, series_index, language, files, formats, filename, cover]
       properties:
         id:
           type: integer
@@ -1356,6 +1388,12 @@ components:
         filename:
           type: string
           description: Имя без каталогов файла с наименьшим id.
+        cover:
+          type: string
+          nullable: true
+          description: |
+            Идентификатор миниатюры для `GET /api/v1/library/covers/{cover}`: обложка файла с
+            наименьшим id среди файлов книги с обложкой. `null`, если обложки нет.
     LibraryBookPage:
       type: object
       required: [items, next_cursor]
@@ -1626,7 +1664,7 @@ components:
       enum: [reading, finished, unknown]
     Book:
       type: object
-      required: [hash, title, authors, filename, percentage, finished, updated_at, device_name, reported_device, library_book_id]
+      required: [hash, title, authors, filename, percentage, finished, updated_at, device_name, reported_device, library_book_id, cover]
       properties:
         hash:
           type: string
@@ -1673,6 +1711,10 @@ components:
           format: int64
           nullable: true
           description: Книга библиотеки, которой принадлежит файл с этим хешем; `null`, если файла нет.
+        cover:
+          type: string
+          nullable: true
+          description: Миниатюра этой книги библиотеки (`LibraryBook.cover`); `null`, если её нет.
     BookCounts:
       type: object
       required: [all, reading, finished, unknown]

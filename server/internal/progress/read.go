@@ -43,6 +43,8 @@ type Book struct {
 	// LibraryBookID — книга библиотеки, из которой берётся название; nil, если
 	// файла с этим хешем в библиотеке нет.
 	LibraryBookID *int64
+	// Cover — миниатюра этой книги библиотеки; nil, если её нет.
+	Cover *string
 }
 
 // Counts — число книг пользователя по фильтрам.
@@ -126,7 +128,8 @@ const metaColumns = `coalesce(c.meta_title, st.title, lb.title), coalesce(c.meta
 	c.meta_filename, lf.path`
 
 const bookColumns = `d.hash, ` + metaColumns + `,
-	e.percentage, e.server_ts, cr.name, e.device, c.event_id, lb.id
+	e.percentage, e.server_ts, cr.name, e.device, c.event_id, lb.id,
+	(SELECT f.cover FROM library_files f WHERE f.book_id = lb.id AND f.cover IS NOT NULL ORDER BY f.id LIMIT 1)
 	FROM progress_current c
 	JOIN documents d ON d.id = c.document_id
 	JOIN progress_events e ON e.id = c.event_id
@@ -360,18 +363,18 @@ type scanner interface{ Scan(dest ...any) error }
 
 func scanBook(r scanner) (Book, int64, error) {
 	var b Book
-	var title, authors, filename, libPath, name sql.NullString
+	var title, authors, filename, libPath, name, cover sql.NullString
 	var ts, eventID int64
 	var libraryID sql.NullInt64
 	if err := r.Scan(&b.Hash, &title, &authors, &filename, &libPath, &b.Percentage, &ts, &name,
-		&b.ReportedDevice, &eventID, &libraryID); err != nil {
+		&b.ReportedDevice, &eventID, &libraryID, &cover); err != nil {
 		return Book{}, 0, err
 	}
 	if libraryID.Valid {
 		b.LibraryBookID = &libraryID.Int64
 	}
 	b.Title, b.Authors, b.Filename = nullable(title), nullable(authors), fileName(filename, libPath)
-	b.DeviceName = nullable(name)
+	b.DeviceName, b.Cover = nullable(name), nullable(cover)
 	b.Finished = b.Percentage >= FinishedAt
 	b.UpdatedAt = time.Unix(ts, 0).UTC()
 	return b, eventID, nil

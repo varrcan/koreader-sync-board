@@ -123,10 +123,10 @@ func TestEPUBErrors(t *testing.T) {
 }
 
 func TestReadAllLimit(t *testing.T) {
-	if b, err := readAll(strings.NewReader(strings.Repeat("x", maxRead))); err != nil || len(b) != maxRead {
+	if b, err := readAll(strings.NewReader(strings.Repeat("x", maxRead)), maxRead); err != nil || len(b) != maxRead {
 		t.Fatalf("exactly at the limit: %d bytes, %v", len(b), err)
 	}
-	if _, err := readAll(strings.NewReader(strings.Repeat("x", maxRead+1))); !errors.Is(err, ErrTooLarge) {
+	if _, err := readAll(strings.NewReader(strings.Repeat("x", maxRead+1)), maxRead); !errors.Is(err, ErrTooLarge) {
 		t.Fatalf("over the limit: %v", err)
 	}
 }

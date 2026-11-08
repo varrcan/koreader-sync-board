@@ -27,8 +27,8 @@ type Book struct {
 // Защищает от zip-бомб и от FB2, у которого до <description> мегабайты мусора.
 const maxRead = 4 << 20
 
-// ErrTooLarge — описание не уместилось в maxRead.
-var ErrTooLarge = errors.New("metadata exceeds 4 MiB")
+// ErrTooLarge — данные не уместились в предел чтения.
+var ErrTooLarge = errors.New("data exceeds the size limit")
 
 // Parse разбирает метаданные файла формата format (как в library_files.format).
 // Для форматов без разбора возвращает пустую Book и nil.
@@ -60,21 +60,29 @@ func FB2Zip(path string) (Book, error) {
 		return Book{}, err
 	}
 	defer z.Close()
-	for _, f := range z.File {
-		if !strings.HasSuffix(strings.ToLower(f.Name), ".fb2") {
-			continue
-		}
-		r, err := f.Open()
-		if err != nil {
-			return Book{}, err
-		}
-		defer r.Close()
-		return FB2(r)
+	f, err := fb2Entry(&z.Reader)
+	if err != nil {
+		return Book{}, err
 	}
-	return Book{}, errors.New("no .fb2 entry in archive")
+	r, err := f.Open()
+	if err != nil {
+		return Book{}, err
+	}
+	defer r.Close()
+	return FB2(r)
 }
 
-// limited ограничивает r пределом maxRead и сообщает ErrTooLarge при его
+// fb2Entry — первая запись *.fb2 архива.
+func fb2Entry(z *zip.Reader) (*zip.File, error) {
+	for _, f := range z.File {
+		if strings.HasSuffix(strings.ToLower(f.Name), ".fb2") {
+			return f, nil
+		}
+	}
+	return nil, errors.New("no .fb2 entry in archive")
+}
+
+// limited ограничивает r пределом и сообщает ErrTooLarge при его
 // превышении, а не обычный EOF, после которого разбор упал бы с невнятной ошибкой.
 type limited struct {
 	r io.Reader
@@ -98,7 +106,7 @@ func (l *limited) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func limit(r io.Reader) io.Reader { return &limited{r: r, n: maxRead} }
+func limit(r io.Reader, n int64) io.Reader { return &limited{r: r, n: n} }
 
 // stripBOM снимает UTF-8 BOM: encoding/xml его не пропускает.
 func stripBOM(r io.Reader) io.Reader {
@@ -127,9 +135,9 @@ func parseIndex(s string) *float64 {
 	return &v
 }
 
-// readAll читает r целиком в пределах maxRead.
-func readAll(r io.Reader) ([]byte, error) {
-	b, err := io.ReadAll(limit(r))
+// readAll читает r целиком в пределах n байт.
+func readAll(r io.Reader, n int64) ([]byte, error) {
+	b, err := io.ReadAll(limit(r, n))
 	if err != nil {
 		return nil, fmt.Errorf("read: %w", err)
 	}

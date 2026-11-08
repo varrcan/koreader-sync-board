@@ -69,14 +69,15 @@ func newEnv(t *testing.T, statsOpts ...statistics.Option) *env {
 	setup := panelauth.NewSetup(acc, lim)
 	stats := statistics.New(db, t.TempDir(), log, statsOpts...)
 	lib := library.NewStore(db)
-	scanner := library.NewScanner(lib, 0, log)
+	covers := library.NewCovers(filepath.Join(t.TempDir(), "covers"))
+	scanner := library.NewScanner(lib, 0, log, library.WithCovers(covers))
 	scanCtx, stopScanner := context.WithCancel(ctx)
 	scannerDone := make(chan struct{})
 	go func() { scanner.Run(scanCtx); close(scannerDone) }()
 	t.Cleanup(func() { stopScanner(); <-scannerDone })
 	api := &Server{Accounts: acc, Auth: panelauth.New(acc, nil, log), Setup: setup,
 		Progress: progress.New(db), Statistics: stats, Log: log,
-		Library: Library{Store: lib, Scanner: scanner}}
+		Library: Library{Store: lib, Scanner: scanner, Covers: covers}}
 	srv := httptest.NewServer(NewHandler(api))
 	t.Cleanup(srv.Close)
 	return &env{t: t, ctx: ctx, url: srv.URL, db: db, acc: acc, setup: setup, stats: stats, logs: logs, srv: api}

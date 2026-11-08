@@ -1,7 +1,11 @@
 package apiv1
 
 import (
+	"archive/zip"
+	"bytes"
 	"fmt"
+	"image"
+	"image/jpeg"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -479,5 +483,118 @@ func TestLibraryDownloadOutlivesServerTimeouts(t *testing.T) {
 	n, err := io.Copy(io.Discard, res.Body)
 	if err != nil || n+1024 != size {
 		t.Fatalf("read %d of %d: %v", n+1024, int64(size), err)
+	}
+}
+
+// coverEPUB — EPUB с названием title и серой обложкой; при gray < 0 обложки нет.
+func coverEPUB(t *testing.T, title string, gray int) string {
+	t.Helper()
+	var manifest, meta string
+	files := map[string][]byte{"META-INF/container.xml": []byte(
+		`<container><rootfiles><rootfile full-path="content.opf"/></rootfiles></container>`)}
+	if gray >= 0 {
+		img := image.NewGray(image.Rect(0, 0, 30, 40))
+		for i := range img.Pix {
+			img.Pix[i] = uint8(gray)
+		}
+		var buf bytes.Buffer
+		if err := jpeg.Encode(&buf, img, nil); err != nil {
+			t.Fatal(err)
+		}
+		files["c.jpg"] = buf.Bytes()
+		manifest, meta = `<item id="c" href="c.jpg" media-type="image/jpeg"/>`, `<meta name="cover" content="c"/>`
+	}
+	files["content.opf"] = []byte(`<package xmlns:dc="http://purl.org/dc/elements/1.1/"><metadata><dc:title>` + title +
+		`</dc:title><dc:creator>A</dc:creator>` + meta + `</metadata><manifest>` + manifest + `</manifest></package>`)
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	for name, data := range files {
+		f, err := w.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+func TestLibraryCover(t *testing.T) {
+	e := newEnv(t)
+	admin := e.panelUser("root", accounts.RoleAdmin)
+	dir := libraryFixture(t, admin, map[string]string{
+		"a.epub": coverEPUB(t, "One", -1),
+		"b.epub": coverEPUB(t, "One", 128),
+		"c.pdf":  "no cover",
+	})
+	user := e.panelUser("alice", accounts.RoleUser)
+
+	r := user.do("GET", "/api/v1/library/books", nil)
+	r.expect(t, "catalog", 200, "")
+	items, _ := r.body["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("catalog %v", r.body)
+	}
+	covers := map[string]any{}
+	for _, it := range items {
+		m := it.(map[string]any)
+		covers[m["filename"].(string)] = m["cover"]
+	}
+	// Файл с меньшим id (a.epub) без обложки: у книги — обложка второго файла.
+	cover, _ := covers["a.epub"].(string)
+	if cover == "" || covers["c.pdf"] != nil {
+		t.Fatalf("covers %v", covers)
+	}
+
+	id := libraryIDs(t, user)["a.epub"]
+	r = user.do("GET", fmt.Sprintf("/api/v1/library/books/%d", id), nil)
+	r.expect(t, "book", 200, "")
+	if book, _ := r.body["book"].(map[string]any); book["cover"] != cover {
+		t.Fatalf("book %v, want %s", r.body, cover)
+	}
+
+	path := "/api/v1/library/covers/" + cover
+	got := user.raw("GET", path, nil)
+	if got.status != 200 || got.header.Get("Content-Type") != "image/jpeg" ||
+		got.header.Get("Cache-Control") != "private, max-age=31536000, immutable" || got.header.Get("Etag") == "" {
+		t.Fatalf("cover: %d %v", got.status, got.header)
+	}
+	if _, err := jpeg.Decode(strings.NewReader(got.body)); err != nil {
+		t.Fatalf("not a JPEG: %v", err)
+	}
+	if nm := user.raw("GET", path, map[string]string{"If-None-Match": got.header.Get("Etag")}); nm.status != 304 {
+		t.Errorf("If-None-Match: %d", nm.status)
+	}
+	if anon := e.browser().raw("GET", path, nil); anon.status != 401 {
+		t.Errorf("anonymous: %d", anon.status)
+	}
+	for _, bad := range []string{"..%2Fksb.sqlite3", "%25zz", strings.Repeat("0", 64), "x"} {
+		if nf := user.raw("GET", "/api/v1/library/covers/"+bad, nil); nf.status != 404 || !strings.Contains(nf.body, "not_found") {
+			t.Errorf("%s: %d %s", bad, nf.status, nf.body)
+		}
+	}
+
+	partial, err := hashing.PartialMD5(filepath.Join(dir, "b.epub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const unknown = "0123456789abcdef0123456789abcdef"
+	reader := e.reader("alice", "pb")
+	reader.sync(partial, 0.4, t0, "")
+	reader.sync(unknown, 0.1, t0.Add(time.Second), "")
+	r = user.do("GET", "/api/v1/books", nil)
+	r.expect(t, "books", 200, "")
+	progress := map[string]any{}
+	books, _ := r.body["items"].([]any)
+	for _, it := range books {
+		m := it.(map[string]any)
+		progress[m["hash"].(string)] = m["cover"]
+	}
+	if progress[partial] != cover || progress[unknown] != nil {
+		t.Fatalf("progress covers %v, want %s", progress, cover)
 	}
 }

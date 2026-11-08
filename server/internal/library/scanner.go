@@ -57,6 +57,9 @@ type Scanner struct {
 	walk  func(root string, fn fs.WalkDirFunc) error
 	hash  func(path string) (string, error)
 	parse func(path, format string) (meta.Book, error)
+
+	covers *Covers // nil — обложки не извлекаются
+	open   func(root, name string) (*os.File, error)
 }
 
 // Option настраивает Scanner.
@@ -72,11 +75,16 @@ func WithReader(hash func(string) (string, error), parse func(path, format strin
 	return func(s *Scanner) { s.hash, s.parse = hash, parse }
 }
 
+// WithCovers включает проход обложек с записью миниатюр в c.
+func WithCovers(c *Covers) Option {
+	return func(s *Scanner) { s.covers = c }
+}
+
 // NewScanner создаёт сканер. interval = 0 — скан только по Trigger.
 func NewScanner(st *Store, interval time.Duration, log *slog.Logger, opts ...Option) *Scanner {
 	s := &Scanner{
 		store: st, log: log, interval: interval, trigger: make(chan struct{}, 1),
-		walk: filepath.WalkDir, hash: hashing.PartialMD5, parse: meta.Parse,
+		walk: filepath.WalkDir, hash: hashing.PartialMD5, parse: meta.Parse, open: os.OpenInRoot,
 	}
 	for _, o := range opts {
 		o(s)
@@ -158,6 +166,98 @@ func (s *Scanner) scanAll(ctx context.Context) {
 		}
 		s.scanRoot(ctx, r)
 	}
+	if ctx.Err() == nil {
+		s.extractCovers(ctx)
+	}
+}
+
+// extractCovers читает обложки файлов, которые ещё не проверены: новых, изменённых
+// и проиндексированных до появления обложек. Идёт после обхода корней, чтобы
+// чтение FB2 целиком не задерживало названия и хеши; scan.running остаётся true.
+func (s *Scanner) extractCovers(ctx context.Context) {
+	if s.covers == nil {
+		return
+	}
+	var (
+		start                 = time.Now()
+		after                 int64
+		checked, found, retry int
+	)
+	warn := func(msg string, err error) {
+		if ctx.Err() == nil {
+			s.log.Warn(msg, "error", err)
+		}
+	}
+	for {
+		files, err := s.store.uncheckedCovers(ctx, after, batchSize)
+		if err != nil {
+			warn("library: covers failed", err)
+			return
+		}
+		if len(files) == 0 {
+			break
+		}
+		for _, f := range files {
+			if ctx.Err() != nil {
+				return
+			}
+			after = f.id
+			src, err := s.readCover(f)
+			var pe *fs.PathError
+			if errors.As(err, &pe) {
+				// Корень отключён или EIO: файл останется непроверенным до следующего скана.
+				retry++
+				s.log.Debug("library: cover unavailable", "path", f.path, "error", err)
+				continue
+			}
+			var id string
+			if err != nil {
+				s.log.Debug("library: cover", "path", f.path, "error", err)
+			} else if src != nil {
+				thumb, err := Thumbnail(src)
+				if err != nil {
+					s.log.Debug("library: cover", "path", f.path, "error", err)
+				} else if id, err = s.covers.save(thumb); err != nil {
+					// Диск заполнен: без уборки, остальным файлам будет то же самое.
+					warn("library: cover write failed", err)
+					return
+				}
+			}
+			if err := s.store.setCover(ctx, f.id, id); err != nil {
+				warn("library: covers failed", err)
+				return
+			}
+			checked++
+			if id != "" {
+				found++
+			}
+		}
+	}
+	used, err := s.store.usedCovers(ctx)
+	if err != nil {
+		warn("library: covers failed", err)
+		return
+	}
+	if err := s.covers.prune(used); err != nil {
+		warn("library: covers cleanup failed", err)
+	}
+	s.log.Info("library: covers finished", "checked", checked, "found", found, "retry", retry,
+		"duration", time.Since(start).Round(time.Millisecond))
+}
+
+// readCover открывает файл только внутри корня: между обходом и проходом его могли
+// подменить симлинком.
+func (s *Scanner) readCover(f coverFile) ([]byte, error) {
+	h, err := s.open(f.root, filepath.FromSlash(f.path))
+	if err != nil {
+		return nil, err
+	}
+	defer h.Close()
+	fi, err := h.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return meta.Cover(h, fi.Size(), f.format)
 }
 
 // errRootGone — корень удалили во время скана.

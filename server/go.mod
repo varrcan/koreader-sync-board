@@ -9,6 +9,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/oapi-codegen/runtime v1.8.0
 	golang.org/x/crypto v0.46.0
+	golang.org/x/image v0.47.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/text v0.43.0
 	modernc.org/sqlite v1.61.0

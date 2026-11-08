@@ -76,7 +76,8 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	prog := progress.New(db)
 	stats := statistics.New(db, cfg.DataDir, log)
 	lib := library.NewStore(db)
-	scanner := library.NewScanner(lib, cfg.LibraryScanInterval, log)
+	covers := library.NewCovers(filepath.Join(cfg.DataDir, "covers"))
+	scanner := library.NewScanner(lib, cfg.LibraryScanInterval, log, library.WithCovers(covers))
 	handler := server.New(server.Handlers{
 		Kosync: kosync.New(acc, prog, kosync.Options{
 			Registration: cfg.KosyncRegistration,
@@ -89,7 +90,7 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 			Setup:      setup,
 			Progress:   prog,
 			Statistics: stats,
-			Library:    apiv1.Library{Store: lib, Scanner: scanner},
+			Library:    apiv1.Library{Store: lib, Scanner: scanner, Covers: covers},
 			Log:        log,
 			SSO:        provider,
 

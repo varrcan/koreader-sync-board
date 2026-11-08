@@ -27,11 +27,11 @@ const SIZES = {
 export type CoverSize = keyof typeof SIZES;
 
 type CoverBook = {
-  hash: string;
+  hash?: string;
   title: string | null;
   authors: string | null;
   filename: string | null;
-  percentage: number;
+  percentage?: number;
 };
 
 // Цвет — от «название + авторы», а не от хеша: одна книга в FB2 и EPUB получает
@@ -58,7 +58,8 @@ export function BookCover({ book, size, className }: { book: CoverBook; size: Co
   };
   const frame = cn("relative flex flex-none flex-col overflow-hidden", className);
 
-  if (isUnknown(book)) {
+  // У книги библиотеки нет хеша: штриховка — только у неизвестной книги прогресса.
+  if (isUnknown(book) && book.hash !== undefined) {
     return (
       <div
         className={frame}
@@ -80,7 +81,7 @@ export function BookCover({ book, size, className }: { book: CoverBook; size: Co
                 {shortHash(book.hash)}
               </div>
               <div className={cn("mt-auto leading-none font-semibold tabular-nums", big ? "text-[40px]" : "text-2xl")}>
-                {formatPercent(book.percentage, i18n.language)}
+                {formatPercent(book.percentage ?? 0, i18n.language)}
               </div>
             </>
           )}

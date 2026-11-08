@@ -28,6 +28,14 @@ var (
 	ErrRootOverlap = errors.New("root overlaps an existing root")
 	// ErrNotFound — корня нет.
 	ErrNotFound = errors.New("root not found")
+	// ErrBookNotFound — книги нет.
+	ErrBookNotFound = errors.New("book not found")
+	// ErrFileNotFound — файла нет в индексе.
+	ErrFileNotFound = errors.New("file not found")
+	// ErrSameBook — книгу сливают саму с собой.
+	ErrSameBook = errors.New("cannot merge a book into itself")
+	// ErrSingleFile — файл единственный в своей книге, отделять нечего.
+	ErrSingleFile = errors.New("file is the only one in its book")
 )
 
 // Root — корень библиотеки.
@@ -193,6 +201,15 @@ func (s *Store) DeleteRoot(ctx context.Context, id int64) error {
 		return err
 	}
 	defer tx.Rollback()
+	var files string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT json_group_array(id) FROM library_files WHERE root_id = ?`, id).Scan(&files); err != nil {
+		return err
+	}
+	books, err := fileBooks(ctx, tx, files)
+	if err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, `DELETE FROM library_roots WHERE id = ?`, id)
 	if err != nil {
 		return err
@@ -202,8 +219,9 @@ func (s *Store) DeleteRoot(ctx context.Context, id int64) error {
 	} else if n == 0 {
 		return ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM library_books WHERE NOT EXISTS (
-		SELECT 1 FROM library_files f WHERE f.book_id = library_books.id)`); err != nil {
+	// После слияния у книги бывают файлы из разных корней: метаданные могли браться
+	// из удалённого.
+	if err := refreshBooks(ctx, tx, books); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -274,18 +292,24 @@ func (s *Store) apply(ctx context.Context, rootID int64, cs []change) error {
 	now := s.now().Unix()
 	var affected []int64
 	for _, c := range cs {
+		var (
+			bookID int64
+			pinned bool
+		)
 		if c.id != 0 {
-			var old int64
-			if err := tx.QueryRowContext(ctx, `SELECT book_id FROM library_files WHERE id = ?`, c.id).Scan(&old); err != nil {
+			if err := tx.QueryRowContext(ctx, `SELECT book_id, pinned FROM library_files WHERE id = ?`, c.id).
+				Scan(&bookID, &pinned); err != nil {
 				return err
 			}
-			affected = append(affected, old)
+			affected = append(affected, bookID)
 		}
-		bookID, err := bookFor(ctx, tx, c.meta, now)
-		if err != nil {
-			return err
+		// Книгу закреплённого файла задал человек: ключ её не переопределяет.
+		if !pinned {
+			if bookID, err = bookFor(ctx, tx, c.meta, now); err != nil {
+				return err
+			}
+			affected = append(affected, bookID)
 		}
-		affected = append(affected, bookID)
 		var authors string
 		if len(c.meta.Authors) > 0 {
 			authors = strings.Join(c.meta.Authors, ", ")

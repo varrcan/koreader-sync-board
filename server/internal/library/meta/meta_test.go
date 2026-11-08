@@ -192,3 +192,17 @@ func mustKey(t *testing.T, title string, authors []string) string {
 	}
 	return k
 }
+
+func TestFold(t *testing.T) {
+	for in, want := range map[string]string{
+		"Пикник  на обочине.": "пикник на обочине",
+		"ЁЛКА":                "елка",
+		"Ёлка: палка—2":       "елка палка 2",
+		"ﬁ-Café":              "fi café",
+		" ... ":               "",
+	} {
+		if got := Fold(in); got != want {
+			t.Errorf("Fold(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

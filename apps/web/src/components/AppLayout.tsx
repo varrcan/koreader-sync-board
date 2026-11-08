@@ -136,6 +136,15 @@ export function AppLayout() {
                 <BookOpen />
               </Link>
             </Button>
+            <Button variant="ghost" size="icon-sm" asChild title={t("nav.library")} aria-label={t("nav.library")}>
+              <Link
+                to="/library"
+                activeOptions={{ includeSearch: false }}
+                activeProps={{ className: "bg-accent text-foreground" }}
+              >
+                <Library />
+              </Link>
+            </Button>
             {/* «Учётная запись» с телефона — ссылкой на экране «Устройства». */}
             <Button variant="ghost" size="icon-sm" asChild title={t("nav.statistics")} aria-label={t("nav.statistics")}>
               <Link

@@ -2,12 +2,37 @@ package apiv1
 
 import (
 	"errors"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
+	"time"
+	"unicode/utf8"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
 	"github.com/varrcan/koreader-sync-board/server/internal/library"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 )
+
+const (
+	maxSearchLength = 200
+	// downloadTimeout заменяет общий срок записи сервера (30 с): книга в сотни
+	// мегабайт по каналу ~1 Мбит/с укладывается, а зависший клиент не держит
+	// соединение вечно. Обрыв докачивается через Range.
+	downloadTimeout = 30 * time.Minute
+)
+
+// contentTypes — Content-Type файла по формату индекса.
+var contentTypes = map[string]string{
+	"epub":    "application/epub+zip",
+	"fb2":     "application/x-fictionbook+xml",
+	"fb2.zip": "application/zip",
+	"pdf":     "application/pdf",
+	"djvu":    "image/vnd.djvu",
+	"mobi":    "application/x-mobipocket-ebook",
+	"azw":     "application/x-mobipocket-ebook",
+	"cbz":     "application/vnd.comicbook+zip",
+}
 
 // Library — индекс библиотеки и его сканер.
 type Library struct {
@@ -108,6 +133,148 @@ func (s *Server) ScanLibrary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, sum)
 }
 
+func (s *Server) ListLibraryBooks(w http.ResponseWriter, r *http.Request, params ListLibraryBooksParams) {
+	limit, before, ok := pageParams(w, params.Limit, params.Cursor)
+	if !ok {
+		return
+	}
+	var q string
+	if params.Q != nil {
+		q = *params.Q
+	}
+	if utf8.RuneCountInString(q) > maxSearchLength {
+		writeError(w, http.StatusBadRequest, "bad_request", "q is too long")
+		return
+	}
+	p, err := s.Library.Store.Books(r.Context(), q, before, limit)
+	if err != nil {
+		s.internal(w, "list library books", err)
+		return
+	}
+	out := LibraryBookPage{Items: make([]LibraryBook, 0, len(p.Items)), NextCursor: cursor(p.Next)}
+	for _, b := range p.Items {
+		out.Items = append(out.Items, libraryBook(b))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) GetLibraryBook(w http.ResponseWriter, r *http.Request, id LibraryBookID) {
+	s.writeLibraryBook(w, r, http.StatusOK, id)
+}
+
+func (s *Server) MergeLibraryBooks(w http.ResponseWriter, r *http.Request, id LibraryBookID) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	var req MergeLibraryBooksRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	err := s.Library.Store.Merge(r.Context(), id, req.BookId)
+	switch {
+	case errors.Is(err, library.ErrSameBook):
+		writeError(w, http.StatusBadRequest, "bad_request", "cannot merge a book into itself")
+		return
+	case errors.Is(err, library.ErrBookNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "book not found")
+		return
+	case err != nil:
+		s.internal(w, "merge library books", err)
+		return
+	}
+	cur, _ := panelauth.FromContext(r.Context())
+	s.Log.Info("panel: library books merged", "user", cur.User.Username, "book", id, "from", req.BookId)
+	s.writeLibraryBook(w, r, http.StatusOK, id)
+}
+
+func (s *Server) SplitLibraryFile(w http.ResponseWriter, r *http.Request, id LibraryFileID) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	book, err := s.Library.Store.Split(r.Context(), id)
+	switch {
+	case errors.Is(err, library.ErrFileNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "file not found")
+		return
+	case errors.Is(err, library.ErrSingleFile):
+		writeError(w, http.StatusConflict, "single_file", "file is the only one in its book")
+		return
+	case err != nil:
+		s.internal(w, "split library file", err)
+		return
+	}
+	cur, _ := panelauth.FromContext(r.Context())
+	s.Log.Info("panel: library file split", "user", cur.User.Username, "file", id, "book", book)
+	s.writeLibraryBook(w, r, http.StatusCreated, book)
+}
+
+func (s *Server) writeLibraryBook(w http.ResponseWriter, r *http.Request, status int, id int64) {
+	cur, _ := panelauth.FromContext(r.Context())
+	d, err := s.Library.Store.Book(r.Context(), id, cur.User.ID)
+	switch {
+	case errors.Is(err, library.ErrBookNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "book not found")
+		return
+	case err != nil:
+		s.internal(w, "get library book", err)
+		return
+	}
+	out := LibraryBookDetail{Book: libraryBook(d.Book), Files: make([]LibraryFile, 0, len(d.Files))}
+	for _, f := range d.Files {
+		out.Files = append(out.Files, libraryFile(f))
+	}
+	writeJSON(w, status, out)
+}
+
+// GetLibraryFileContent отдаёт файл с диска. os.OpenInRoot не выпускает за корень
+// ни через «..», ни через симлинк, подменённый после скана.
+func (s *Server) GetLibraryFileContent(w http.ResponseWriter, r *http.Request, id LibraryFileID) {
+	loc, err := s.Library.Store.FileLocation(r.Context(), id)
+	switch {
+	case errors.Is(err, library.ErrFileNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "file not found")
+		return
+	case err != nil:
+		s.internal(w, "library file location", err)
+		return
+	}
+	unavailable := func(err error) {
+		s.Log.Warn("panel: library file unavailable", "root", loc.Root, "path", loc.Path, "err", err)
+		writeError(w, http.StatusNotFound, "file_unavailable", "file is unavailable")
+	}
+	rel := filepath.FromSlash(loc.Path)
+	f, err := os.OpenInRoot(loc.Root, rel)
+	if err != nil {
+		unavailable(err)
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		unavailable(err)
+		return
+	}
+	if !fi.Mode().IsRegular() {
+		unavailable(errors.New("not a regular file"))
+		return
+	}
+	// ResponseRecorder сроков не поддерживает, ошибка не важна.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(downloadTimeout))
+	name := filepath.Base(rel)
+	h := w.Header()
+	h.Set("Content-Type", contentType(loc.Format))
+	h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
+	h.Set("X-Content-Type-Options", "nosniff")
+	http.ServeContent(w, r, name, fi.ModTime(), f)
+}
+
+func contentType(format string) string {
+	if t, ok := contentTypes[format]; ok {
+		return t
+	}
+	return "application/octet-stream"
+}
+
 func (s *Server) librarySummary(r *http.Request) (LibrarySummary, error) {
 	sum, err := s.Library.Scanner.Summary(r.Context())
 	if err != nil {
@@ -131,4 +298,24 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 
 func libraryRoot(r library.Root) LibraryRoot {
 	return LibraryRoot{Id: r.ID, Name: r.Name, Path: r.Path, Files: r.Files, ScannedAt: r.ScannedAt, Error: r.Error}
+}
+
+func libraryBook(b library.Book) LibraryBook {
+	return LibraryBook{
+		Id: b.ID, Title: b.Title, Authors: b.Authors, Series: b.Series, SeriesIndex: b.SeriesIndex,
+		Language: b.Language, Files: b.Files, Formats: b.Formats, Filename: b.Filename,
+	}
+}
+
+func libraryFile(f library.File) LibraryFile {
+	out := LibraryFile{
+		Id: f.ID, RootName: f.RootName, Path: f.Path, Format: f.Format, Size: f.Size,
+		Title: f.Title, Authors: f.Authors, Pinned: f.Pinned,
+	}
+	if p := f.Progress; p != nil {
+		out.Progress = &LibraryFileProgress{
+			Hash: p.Hash, Percentage: p.Percentage, Finished: p.Finished, UpdatedAt: p.UpdatedAt,
+		}
+	}
+	return out
 }

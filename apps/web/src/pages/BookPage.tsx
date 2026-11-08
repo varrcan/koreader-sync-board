@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { ArrowLeft, CircleHelp, TabletSmartphone } from "lucide-react";
+import { ArrowLeft, CircleHelp, Library, TabletSmartphone } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ApiFailure } from "@/api";
 import { ActivityFeed } from "@/components/ActivityFeed";
@@ -76,6 +76,16 @@ export function BookPage() {
             <div className="truncate text-sm text-muted-foreground">
               {t("book.file")}: <span className="font-mono text-[13px]">{book.filename}</span>
             </div>
+          )}
+          {book.library_book_id !== null && (
+            <Link
+              to="/library/books/$id"
+              params={{ id: String(book.library_book_id) }}
+              className="flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-foreground [&_svg]:size-4"
+            >
+              <Library />
+              {t("book.inLibrary")}
+            </Link>
           )}
           <div className="mt-auto flex flex-col gap-2 pt-4">
             <div className="flex flex-wrap items-baseline gap-x-2.5">

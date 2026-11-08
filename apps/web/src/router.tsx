@@ -14,7 +14,9 @@ import { HelpProgressPage } from "./pages/help/HelpProgressPage";
 import { HelpStatisticsPage } from "./pages/help/HelpStatisticsPage";
 import { HelpTroubleshootingPage } from "./pages/help/HelpTroubleshootingPage";
 import { HomePage } from "./pages/HomePage";
+import { LibraryBookPage } from "./pages/LibraryBookPage";
 import { LibraryPage } from "./pages/LibraryPage";
+import { LibraryRootsPage } from "./pages/LibraryRootsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SetupPage } from "./pages/SetupPage";
 import { StatisticsPage } from "./pages/StatisticsPage";
@@ -101,7 +103,25 @@ const bookRoute = createRoute({
 const libraryRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/library",
+  validateSearch: (search: Record<string, unknown>): { q?: string } =>
+    typeof search.q === "string" && search.q !== "" ? { q: search.q } : {},
   component: LibraryPage,
+});
+
+const libraryRootsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/library/roots",
+  beforeLoad: async () => {
+    const me = await queryClient.ensureQueryData(meQuery);
+    if (me?.role !== "admin") throw redirect({ to: "/library", replace: true });
+  },
+  component: LibraryRootsPage,
+});
+
+const libraryBookRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/library/books/$id",
+  component: LibraryBookPage,
 });
 
 const statisticsPeriods: readonly string[] = ["week", "month", "year"] satisfies StatisticsPeriod[];
@@ -178,6 +198,8 @@ const routeTree = rootRoute.addChildren([
     booksRoute,
     bookRoute,
     libraryRoute,
+    libraryRootsRoute,
+    libraryBookRoute,
     statisticsRoute,
     devicesRoute,
     accountRoute,

@@ -40,6 +40,9 @@ type Book struct {
 	// DeviceName — имя учётных данных устройства; nil, если они удалены.
 	DeviceName     *string
 	ReportedDevice string
+	// LibraryBookID — книга библиотеки, из которой берётся название; nil, если
+	// файла с этим хешем в библиотеке нет.
+	LibraryBookID *int64
 }
 
 // Counts — число книг пользователя по фильтрам.
@@ -123,7 +126,7 @@ const metaColumns = `coalesce(c.meta_title, st.title, lb.title), coalesce(c.meta
 	c.meta_filename, lf.path`
 
 const bookColumns = `d.hash, ` + metaColumns + `,
-	e.percentage, e.server_ts, cr.name, e.device, c.event_id
+	e.percentage, e.server_ts, cr.name, e.device, c.event_id, lb.id
 	FROM progress_current c
 	JOIN documents d ON d.id = c.document_id
 	JOIN progress_events e ON e.id = c.event_id
@@ -359,9 +362,13 @@ func scanBook(r scanner) (Book, int64, error) {
 	var b Book
 	var title, authors, filename, libPath, name sql.NullString
 	var ts, eventID int64
+	var libraryID sql.NullInt64
 	if err := r.Scan(&b.Hash, &title, &authors, &filename, &libPath, &b.Percentage, &ts, &name,
-		&b.ReportedDevice, &eventID); err != nil {
+		&b.ReportedDevice, &eventID, &libraryID); err != nil {
 		return Book{}, 0, err
+	}
+	if libraryID.Valid {
+		b.LibraryBookID = &libraryID.Int64
 	}
 	b.Title, b.Authors, b.Filename = nullable(title), nullable(authors), fileName(filename, libPath)
 	b.DeviceName = nullable(name)

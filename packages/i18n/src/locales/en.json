@@ -261,7 +261,8 @@
       "dates": "{{from}} – {{to}}",
       "noSnapshot": "Book statistics will appear once you sync reading statistics on the reader.",
       "notInSnapshot": "This book is not in the reading statistics. Statistics are matched to a book by the hash of the file contents and won't be found if <matchingMethod/> is set to <matchingFilename/>. Or the book hasn't reached the synced statistics yet."
-    }
+    },
+    "inLibrary": "In the library"
   },
   "feed": {
     "today": "Today",
@@ -271,14 +272,13 @@
   },
   "library": {
     "title": "Library",
-    "description": "Book files on the server. Synced books get their title, authors and file name from them.",
     "books": "Books",
     "files": "Files",
     "roots": "Folders",
     "scanning": "Scanning…",
     "lastScan": "Last scanned {{when}}",
     "neverScanned": "The library has not been scanned yet.",
-    "emptyUser": "Book folders are added by the server administrator on this screen.",
+    "emptyUser": "Book folders are added by the server administrator.",
     "scan": "Scan",
     "rootsTitle": "Book folders",
     "rootsDescription": "The server only reads these folders and never changes anything in them. New and changed files are found by a scan: after a folder is added, on schedule and with the Scan button.",
@@ -297,6 +297,29 @@
       "title": "Delete folder “{{name}}”?",
       "description": "Its files and the books left without files leave the library. Files on disk are not touched.",
       "confirm": "Delete"
+    },
+    "search": "Title, author, series or file name",
+    "rootsLink": "Roots and scanning",
+    "empty": "There are no books in the library yet.",
+    "emptyAdmin": "No book folders have been added yet.",
+    "noResults": "Nothing found.",
+    "detail": {
+      "notFound": "Book not found",
+      "notFoundText": "There is no such book in the library: it may have been merged into another one or removed by a scan.",
+      "series": "Series",
+      "language": "Language",
+      "files": "Files",
+      "pinned": "Pinned",
+      "pinnedHint": "This file was assigned to the book by hand: scans keep it here.",
+      "yourProgress": "{{percent}} read",
+      "download": "Download",
+      "split": "Move to a separate book",
+      "merge": "Merge with…",
+      "mergeTitle": "Merge with “{{title}}”",
+      "mergeDescription": "Find the book to merge into this one. Its files move here and it disappears from the catalog.",
+      "mergeConfirmText": "“{{from}}” will be merged into “{{into}}”. To undo, split the files back out.",
+      "mergeConfirm": "Merge",
+      "mergeBack": "Back"
     }
   },
   "errors": {
@@ -332,7 +355,10 @@
     "unknown": "The request failed. Please try again.",
     "invalid_path": "Enter an absolute path to an existing folder the server can read.",
     "root_exists": "This folder is already added.",
-    "root_overlap": "The folder is inside an added folder or contains one."
+    "root_overlap": "The folder is inside an added folder or contains one.",
+    "single_file": "This is the only file of the book: there is nothing to split off.",
+    "file_unavailable": "The file is unavailable: its folder is offline or the file was removed.",
+    "library_not_found": "This is no longer in the library. Refresh the page."
   },
   "statistics": {
     "title": "Reading statistics",

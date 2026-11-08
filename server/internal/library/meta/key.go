@@ -13,13 +13,13 @@ import (
 // Стругацкий», а EPUB от calibre — «Стругацкий Аркадий». ok = false, если после
 // нормализации название пустое: такой файл становится отдельной книгой.
 func Key(title string, authors []string) (key string, ok bool) {
-	t := normalize(title)
+	t := Fold(title)
 	if t == "" {
 		return "", false
 	}
 	var as []string
 	for _, a := range authors {
-		words := strings.Fields(normalize(a))
+		words := strings.Fields(Fold(a))
 		if len(words) == 0 {
 			continue
 		}
@@ -30,9 +30,10 @@ func Key(title string, authors []string) (key string, ok bool) {
 	return t + "\x1f" + strings.Join(as, "\x1e"), true
 }
 
-// normalize: NFKC, нижний регистр, ё→е, всё, кроме букв, цифр и диакритики без
-// составной формы, — пробел; пробелы схлопнуты.
-func normalize(s string) string {
+// Fold: NFKC, нижний регистр, ё→е, всё, кроме букв, цифр и диакритики без
+// составной формы, — пробел; пробелы схлопнуты. Общая для ключа группировки и
+// поиска по каталогу.
+func Fold(s string) string {
 	s = strings.ToLower(norm.NFKC.String(s))
 	s = strings.Map(func(r rune) rune {
 		switch {

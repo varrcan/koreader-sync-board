@@ -205,6 +205,9 @@ type Book struct {
 	// Hash Example: 0123456789abcdef0123456789abcdef
 	Hash string `json:"hash"`
 
+	// LibraryBookId Книга библиотеки, которой принадлежит файл с этим хешем; `null`, если файла нет.
+	LibraryBookId *int64 `json:"library_book_id"`
+
 	// Percentage Последний присланный процент, 0–1.
 	//
 	// Example: 0.624
@@ -382,6 +385,70 @@ type Health struct {
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
 
+// LibraryBook defines model for LibraryBook.
+type LibraryBook struct {
+	Authors *string `json:"authors"`
+
+	// Filename Имя без каталогов файла с наименьшим id.
+	Filename string `json:"filename"`
+
+	// Files Число файлов.
+	Files int `json:"files"`
+
+	// Formats Различные форматы файлов в порядке их id.
+	//
+	// Example: ["fb2","epub"]
+	Formats     []string `json:"formats"`
+	Id          int64    `json:"id"`
+	Language    *string  `json:"language"`
+	Series      *string  `json:"series"`
+	SeriesIndex *float64 `json:"series_index"`
+	Title       *string  `json:"title"`
+}
+
+// LibraryBookDetail defines model for LibraryBookDetail.
+type LibraryBookDetail struct {
+	Book  LibraryBook   `json:"book"`
+	Files []LibraryFile `json:"files"`
+}
+
+// LibraryBookPage defines model for LibraryBookPage.
+type LibraryBookPage struct {
+	Items []LibraryBook `json:"items"`
+
+	// NextCursor `null` на последней странице.
+	NextCursor *string `json:"next_cursor"`
+}
+
+// LibraryFile defines model for LibraryFile.
+type LibraryFile struct {
+	Authors *string `json:"authors"`
+
+	// Format Example: epub
+	Format string `json:"format"`
+	Id     int64  `json:"id"`
+
+	// Path Относительно корня, через `/`.
+	Path string `json:"path"`
+
+	// Pinned Книгу файла задал человек, скан не переносит его по ключу.
+	Pinned   bool                 `json:"pinned"`
+	Progress *LibraryFileProgress `json:"progress"`
+	RootName string               `json:"root_name"`
+	Size     int64                `json:"size"`
+	Title    *string              `json:"title"`
+}
+
+// LibraryFileProgress Последнее по времени состояние прогресса владельца сессии по любому из хешей файла.
+type LibraryFileProgress struct {
+	Finished bool `json:"finished"`
+
+	// Hash Хеш документа, адрес карточки прогресса.
+	Hash       string    `json:"hash"`
+	Percentage float64   `json:"percentage"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 // LibraryRoot defines model for LibraryRoot.
 type LibraryRoot struct {
 	// Error Ошибка последнего скана; `null`, если он прошёл без ошибок.
@@ -441,6 +508,12 @@ type Me struct {
 	OidcLinked bool   `json:"oidc_linked"`
 	Role       Role   `json:"role"`
 	Username   string `json:"username"`
+}
+
+// MergeLibraryBooksRequest defines model for MergeLibraryBooksRequest.
+type MergeLibraryBooksRequest struct {
+	// BookId Книга, которая вливается в `{id}` и удаляется.
+	BookId int64 `json:"book_id"`
 }
 
 // OIDCLinkStart defines model for OIDCLinkStart.
@@ -672,6 +745,12 @@ type Cursor = string
 // DeviceID defines model for DeviceID.
 type DeviceID = int64
 
+// LibraryBookID defines model for LibraryBookID.
+type LibraryBookID = int64
+
+// LibraryFileID defines model for LibraryFileID.
+type LibraryFileID = int64
+
 // LibraryRootID defines model for LibraryRootID.
 type LibraryRootID = int64
 
@@ -695,6 +774,9 @@ type DeviceExists = Error
 
 // Forbidden defines model for Forbidden.
 type Forbidden = Error
+
+// LibraryNotFound defines model for LibraryNotFound.
+type LibraryNotFound = Error
 
 // NotFound defines model for NotFound.
 type NotFound = Error
@@ -755,6 +837,20 @@ type GetBookStatisticsParams struct {
 	Tz TimeZone `form:"tz" json:"tz"`
 }
 
+// ListLibraryBooksParams defines parameters for ListLibraryBooks.
+type ListLibraryBooksParams struct {
+	// Q Поиск: каждое слово должно входить в название, авторов, серию или путь одного из
+	// файлов книги. Регистр, порядок слов, пунктуация и различие `ё`/`е` не важны. Не
+	// длиннее 200 символов.
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
+
+	// Limit Размер страницы.
+	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor `next_cursor` предыдущей страницы; клиент его не разбирает.
+	Cursor *Cursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
 // GetStatisticsCalendarParams defines parameters for GetStatisticsCalendar.
 type GetStatisticsCalendarParams struct {
 	// Tz Часовой пояс IANA (`Europe/Moscow`, `UTC`), по которому считаются дни и часы.
@@ -792,6 +888,9 @@ type CreateDeviceJSONRequestBody = CreateDeviceRequest
 
 // RenameDeviceJSONRequestBody defines body for RenameDevice for application/json ContentType.
 type RenameDeviceJSONRequestBody = RenameDeviceRequest
+
+// MergeLibraryBooksJSONRequestBody defines body for MergeLibraryBooks for application/json ContentType.
+type MergeLibraryBooksJSONRequestBody = MergeLibraryBooksRequest
 
 // CreateLibraryRootJSONRequestBody defines body for CreateLibraryRoot for application/json ContentType.
 type CreateLibraryRootJSONRequestBody = CreateLibraryRootRequest
@@ -852,6 +951,21 @@ type ServerInterface interface {
 	// GetLibrary Сводка библиотеки
 	// (GET /api/v1/library)
 	GetLibrary(w http.ResponseWriter, r *http.Request)
+	// ListLibraryBooks Каталог библиотеки
+	// (GET /api/v1/library/books)
+	ListLibraryBooks(w http.ResponseWriter, r *http.Request, params ListLibraryBooksParams)
+	// GetLibraryBook Книга библиотеки
+	// (GET /api/v1/library/books/{id})
+	GetLibraryBook(w http.ResponseWriter, r *http.Request, id LibraryBookID)
+	// MergeLibraryBooks Объединить книги
+	// (POST /api/v1/library/books/{id}/merge)
+	MergeLibraryBooks(w http.ResponseWriter, r *http.Request, id LibraryBookID)
+	// GetLibraryFileContent Скачать файл
+	// (GET /api/v1/library/files/{id}/content)
+	GetLibraryFileContent(w http.ResponseWriter, r *http.Request, id LibraryFileID)
+	// SplitLibraryFile Отделить файл в новую книгу
+	// (POST /api/v1/library/files/{id}/split)
+	SplitLibraryFile(w http.ResponseWriter, r *http.Request, id LibraryFileID)
 	// ListLibraryRoots Корни библиотеки
 	// (GET /api/v1/library/roots)
 	ListLibraryRoots(w http.ResponseWriter, r *http.Request)
@@ -1381,6 +1495,169 @@ func (siw *ServerInterfaceWrapper) GetLibrary(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListLibraryBooks operation middleware
+func (siw *ServerInterfaceWrapper) ListLibraryBooks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListLibraryBooksParams
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", r.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cursor"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cursor", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLibraryBooks(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLibraryBook operation middleware
+func (siw *ServerInterfaceWrapper) GetLibraryBook(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id LibraryBookID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLibraryBook(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MergeLibraryBooks operation middleware
+func (siw *ServerInterfaceWrapper) MergeLibraryBooks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id LibraryBookID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MergeLibraryBooks(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetLibraryFileContent operation middleware
+func (siw *ServerInterfaceWrapper) GetLibraryFileContent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id LibraryFileID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetLibraryFileContent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SplitLibraryFile operation middleware
+func (siw *ServerInterfaceWrapper) SplitLibraryFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id LibraryFileID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SplitLibraryFile(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListLibraryRoots operation middleware
 func (siw *ServerInterfaceWrapper) ListLibraryRoots(w http.ResponseWriter, r *http.Request) {
 
@@ -1880,6 +2157,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/roots", wrapper.CreateLibraryRoot)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/library/roots/{id}", wrapper.DeleteLibraryRoot)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/scan", wrapper.ScanLibrary)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/books", wrapper.ListLibraryBooks)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/books/{id}", wrapper.GetLibraryBook)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/books/{id}/merge", wrapper.MergeLibraryBooks)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/files/{id}/content", wrapper.GetLibraryFileContent)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/files/{id}/split", wrapper.SplitLibraryFile)
 
 	return m
 }

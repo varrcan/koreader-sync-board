@@ -80,6 +80,7 @@ export function errorText(t: TFunction, err: unknown): string {
     case "invalid_path":
     case "root_exists":
     case "root_overlap":
+    case "single_file":
     case "invalid_statistics":
     case "file_too_large":
     case "conflict":

@@ -637,6 +637,117 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/books": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Каталог библиотеки
+         * @description Книги от последней созданной к более ранним. Доступен любому пользователю.
+         */
+        get: operations["listLibraryBooks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/books/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryBookID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Книга библиотеки
+         * @description Книга и её файлы по возрастанию id. Прогресс у файлов — только владельца сессии.
+         *     Доступна любому пользователю.
+         */
+        get: operations["getLibraryBook"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/books/{id}/merge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryBookID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Объединить книги
+         * @description Только администратору. Ключи группировки и файлы книги `book_id` переходят в книгу
+         *     `{id}`, файлы закрепляются за ней, книга `book_id` удаляется. Прогресс не меняется.
+         */
+        post: operations["mergeLibraryBooks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/files/{id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryFileID"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Скачать файл
+         * @description Текущее содержимое файла на диске, с `Range`. `HEAD` обслуживается тем же маршрутом и
+         *     отдаёт только заголовки. Доступно любому пользователю.
+         */
+        get: operations["getLibraryFileContent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/files/{id}/split": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryFileID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отделить файл в новую книгу
+         * @description Только администратору. Файл уходит в новую книгу без ключей и закрепляется за ней.
+         */
+        post: operations["splitLibraryFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -688,6 +799,70 @@ export interface components {
             path: string;
             /** @description Пустое или отсутствующее — последний элемент пути. */
             name?: string;
+        };
+        LibraryBook: {
+            /** Format: int64 */
+            id: number;
+            title: string | null;
+            authors: string | null;
+            series: string | null;
+            /** Format: double */
+            series_index: number | null;
+            language: string | null;
+            /** @description Число файлов. */
+            files: number;
+            /**
+             * @description Различные форматы файлов в порядке их id.
+             * @example [
+             *       "fb2",
+             *       "epub"
+             *     ]
+             */
+            formats: string[];
+            /** @description Имя без каталогов файла с наименьшим id. */
+            filename: string;
+        };
+        LibraryBookPage: {
+            items: components["schemas"]["LibraryBook"][];
+            /** @description `null` на последней странице. */
+            next_cursor: string | null;
+        };
+        /** @description Последнее по времени состояние прогресса владельца сессии по любому из хешей файла. */
+        LibraryFileProgress: {
+            /** @description Хеш документа, адрес карточки прогресса. */
+            hash: string;
+            /** Format: double */
+            percentage: number;
+            finished: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        LibraryFile: {
+            /** Format: int64 */
+            id: number;
+            root_name: string;
+            /** @description Относительно корня, через `/`. */
+            path: string;
+            /** @example epub */
+            format: string;
+            /** Format: int64 */
+            size: number;
+            title: string | null;
+            authors: string | null;
+            /** @description Книгу файла задал человек, скан не переносит его по ключу. */
+            pinned: boolean;
+            progress: components["schemas"]["LibraryFileProgress"] | null;
+        };
+        LibraryBookDetail: {
+            book: components["schemas"]["LibraryBook"];
+            files: components["schemas"]["LibraryFile"][];
+        };
+        MergeLibraryBooksRequest: {
+            /**
+             * Format: int64
+             * @description Книга, которая вливается в `{id}` и удаляется.
+             */
+            book_id: number;
         };
         Health: {
             /** @enum {string} */
@@ -853,6 +1028,11 @@ export interface components {
              * @example PocketBook 740
              */
             reported_device: string;
+            /**
+             * Format: int64
+             * @description Книга библиотеки, которой принадлежит файл с этим хешем; `null`, если файла нет.
+             */
+            library_book_id: number | null;
         };
         BookCounts: {
             all: number;
@@ -1142,6 +1322,15 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description `not_found`: книги или файла нет */
+        LibraryNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description `bad_request`: неверный параметр запроса */
         BadRequest: {
             headers: {
@@ -1209,6 +1398,8 @@ export interface components {
         };
     };
     parameters: {
+        LibraryBookID: number;
+        LibraryFileID: number;
         LibraryRootID: number;
         DeviceID: number;
         /** @description Хеш документа, как его прислала читалка. */
@@ -2241,6 +2432,210 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description `forbidden` (не администратор) или `cross_origin` */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listLibraryBooks: {
+        parameters: {
+            query?: {
+                /**
+                 * @description Поиск: каждое слово должно входить в название, авторов, серию или путь одного из
+                 *     файлов книги. Регистр, порядок слов, пунктуация и различие `ё`/`е` не важны. Не
+                 *     длиннее 200 символов.
+                 */
+                q?: string;
+                /** @description Размер страницы. */
+                limit?: components["parameters"]["Limit"];
+                /** @description `next_cursor` предыдущей страницы; клиент его не разбирает. */
+                cursor?: components["parameters"]["Cursor"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница каталога */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryBookPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getLibraryBook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryBookID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Книга и файлы */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryBookDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["LibraryNotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
+    mergeLibraryBooks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryBookID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MergeLibraryBooksRequest"];
+            };
+        };
+        responses: {
+            /** @description Книга `{id}` после слияния */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryBookDetail"];
+                };
+            };
+            /** @description `bad_request`: неверное тело или слияние книги с собой */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` (не администратор) или `cross_origin` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            404: components["responses"]["LibraryNotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getLibraryFileContent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryFileID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Файл целиком; `Content-Type` — по формату, имя — в `Content-Disposition` */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": Blob;
+                };
+            };
+            /** @description Запрошенный диапазон */
+            206: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": Blob;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /**
+             * @description `not_found` — файла нет в индексе; `file_unavailable` — файл в индексе, но не
+             *     открывается (корень недоступен, файл удалён или ведёт за пределы корня).
+             */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /**
+             * @description Диапазон неудовлетворим. Стандартный ответ HTTP с текстовым телом, без кода ошибки:
+             *     его разбирают браузер и менеджеры загрузок.
+             */
+            416: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    splitLibraryFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryFileID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Новая книга */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryBookDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` (не администратор) или `cross_origin` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            404: components["responses"]["LibraryNotFound"];
+            /** @description `single_file`: файл единственный в своей книге */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

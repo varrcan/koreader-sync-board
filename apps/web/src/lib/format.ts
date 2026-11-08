@@ -34,6 +34,18 @@ export function formatDuration(seconds: number, lang: string, narrow = false): s
   return m === 0 ? unit("hour", h) : `${unit("hour", h)} ${unit("minute", m)}`;
 }
 
+/** Размер файла: «812 КБ», «3,4 МБ». */
+export function formatSize(bytes: number, lang: string): string {
+  const sizes = ["byte", "kilobyte", "megabyte", "gigabyte"] as const;
+  const i = Math.min(bytes > 0 ? Math.floor(Math.log(bytes) / Math.log(1024)) : 0, sizes.length - 1);
+  return new Intl.NumberFormat(lang, {
+    style: "unit",
+    unit: sizes[i],
+    unitDisplay: "short",
+    maximumFractionDigits: i < 2 ? 0 : 1,
+  }).format(bytes / 1024 ** i);
+}
+
 /** Дата API (YYYY-MM-DD) как локальная полночь: new Date("2026-11-04") — полночь UTC. */
 export function parseDate(date: string): Date {
   const [y = 0, m = 1, d = 1] = date.split("-").map(Number);

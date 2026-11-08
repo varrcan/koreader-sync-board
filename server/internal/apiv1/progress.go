@@ -140,6 +140,6 @@ func book(b progress.Book) Book {
 	return Book{
 		Hash: b.Hash, Title: b.Title, Authors: b.Authors, Filename: b.Filename,
 		Percentage: b.Percentage, Finished: b.Finished, UpdatedAt: b.UpdatedAt,
-		DeviceName: b.DeviceName, ReportedDevice: b.ReportedDevice,
+		DeviceName: b.DeviceName, ReportedDevice: b.ReportedDevice, LibraryBookId: b.LibraryBookID,
 	}
 }

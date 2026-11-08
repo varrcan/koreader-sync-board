@@ -933,8 +933,192 @@ paths:
                 $ref: "#/components/schemas/Error"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/library/books:
+    get:
+      operationId: listLibraryBooks
+      summary: Каталог библиотеки
+      description: Книги от последней созданной к более ранним. Доступен любому пользователю.
+      tags: [library]
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: |
+            Поиск: каждое слово должно входить в название, авторов, серию или путь одного из
+            файлов книги. Регистр, порядок слов, пунктуация и различие `ё`/`е` не важны. Не
+            длиннее 200 символов.
+          schema:
+            type: string
+            maxLength: 200
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Страница каталога
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryBookPage"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/library/books/{id}:
+    parameters:
+      - $ref: "#/components/parameters/LibraryBookID"
+    get:
+      operationId: getLibraryBook
+      summary: Книга библиотеки
+      description: |
+        Книга и её файлы по возрастанию id. Прогресс у файлов — только владельца сессии.
+        Доступна любому пользователю.
+      tags: [library]
+      responses:
+        "200":
+          description: Книга и файлы
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryBookDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/LibraryNotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/library/books/{id}/merge:
+    parameters:
+      - $ref: "#/components/parameters/LibraryBookID"
+    post:
+      operationId: mergeLibraryBooks
+      summary: Объединить книги
+      description: |
+        Только администратору. Ключи группировки и файлы книги `book_id` переходят в книгу
+        `{id}`, файлы закрепляются за ней, книга `book_id` удаляется. Прогресс не меняется.
+      tags: [library]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MergeLibraryBooksRequest"
+      responses:
+        "200":
+          description: Книга `{id}` после слияния
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryBookDetail"
+        "400":
+          description: "`bad_request`: неверное тело или слияние книги с собой"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "`forbidden` (не администратор) или `cross_origin`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/LibraryNotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/library/files/{id}/content:
+    parameters:
+      - $ref: "#/components/parameters/LibraryFileID"
+    get:
+      operationId: getLibraryFileContent
+      summary: Скачать файл
+      description: |
+        Текущее содержимое файла на диске, с `Range`. `HEAD` обслуживается тем же маршрутом и
+        отдаёт только заголовки. Доступно любому пользователю.
+      tags: [library]
+      responses:
+        "200":
+          description: Файл целиком; `Content-Type` — по формату, имя — в `Content-Disposition`
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "206":
+          description: Запрошенный диапазон
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |
+            `not_found` — файла нет в индексе; `file_unavailable` — файл в индексе, но не
+            открывается (корень недоступен, файл удалён или ведёт за пределы корня).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "416":
+          description: |
+            Диапазон неудовлетворим. Стандартный ответ HTTP с текстовым телом, без кода ошибки:
+            его разбирают браузер и менеджеры загрузок.
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/library/files/{id}/split:
+    parameters:
+      - $ref: "#/components/parameters/LibraryFileID"
+    post:
+      operationId: splitLibraryFile
+      summary: Отделить файл в новую книгу
+      description: Только администратору. Файл уходит в новую книгу без ключей и закрепляется за ней.
+      tags: [library]
+      responses:
+        "201":
+          description: Новая книга
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryBookDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "`forbidden` (не администратор) или `cross_origin`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/LibraryNotFound"
+        "409":
+          description: "`single_file`: файл единственный в своей книге"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
 components:
   parameters:
+    LibraryBookID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+    LibraryFileID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
     LibraryRootID:
       name: id
       in: path
@@ -1007,6 +1191,12 @@ components:
             $ref: "#/components/schemas/Error"
     BookNotFound:
       description: "`not_found`: у владельца сессии нет прогресса по этому документу"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    LibraryNotFound:
+      description: "`not_found`: книги или файла нет"
       content:
         application/json:
           schema:
@@ -1131,6 +1321,118 @@ components:
         name:
           type: string
           description: Пустое или отсутствующее — последний элемент пути.
+    LibraryBook:
+      type: object
+      required: [id, title, authors, series, series_index, language, files, formats, filename]
+      properties:
+        id:
+          type: integer
+          format: int64
+        title:
+          type: string
+          nullable: true
+        authors:
+          type: string
+          nullable: true
+        series:
+          type: string
+          nullable: true
+        series_index:
+          type: number
+          format: double
+          nullable: true
+        language:
+          type: string
+          nullable: true
+        files:
+          type: integer
+          description: Число файлов.
+        formats:
+          type: array
+          description: Различные форматы файлов в порядке их id.
+          items:
+            type: string
+          example: [fb2, epub]
+        filename:
+          type: string
+          description: Имя без каталогов файла с наименьшим id.
+    LibraryBookPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryBook"
+        next_cursor:
+          type: string
+          nullable: true
+          description: "`null` на последней странице."
+    LibraryFileProgress:
+      type: object
+      required: [hash, percentage, finished, updated_at]
+      description: Последнее по времени состояние прогресса владельца сессии по любому из хешей файла.
+      properties:
+        hash:
+          type: string
+          description: Хеш документа, адрес карточки прогресса.
+        percentage:
+          type: number
+          format: double
+        finished:
+          type: boolean
+        updated_at:
+          type: string
+          format: date-time
+    LibraryFile:
+      type: object
+      required: [id, root_name, path, format, size, title, authors, pinned, progress]
+      properties:
+        id:
+          type: integer
+          format: int64
+        root_name:
+          type: string
+        path:
+          type: string
+          description: Относительно корня, через `/`.
+        format:
+          type: string
+          example: epub
+        size:
+          type: integer
+          format: int64
+        title:
+          type: string
+          nullable: true
+        authors:
+          type: string
+          nullable: true
+        pinned:
+          type: boolean
+          description: Книгу файла задал человек, скан не переносит его по ключу.
+        progress:
+          allOf:
+            - $ref: "#/components/schemas/LibraryFileProgress"
+          nullable: true
+    LibraryBookDetail:
+      type: object
+      required: [book, files]
+      properties:
+        book:
+          $ref: "#/components/schemas/LibraryBook"
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/LibraryFile"
+    MergeLibraryBooksRequest:
+      type: object
+      required: [book_id]
+      properties:
+        book_id:
+          type: integer
+          format: int64
+          description: Книга, которая вливается в `{id}` и удаляется.
     Health:
       type: object
       required: [status]
@@ -1324,7 +1626,7 @@ components:
       enum: [reading, finished, unknown]
     Book:
       type: object
-      required: [hash, title, authors, filename, percentage, finished, updated_at, device_name, reported_device]
+      required: [hash, title, authors, filename, percentage, finished, updated_at, device_name, reported_device, library_book_id]
       properties:
         hash:
           type: string
@@ -1366,6 +1668,11 @@ components:
           type: string
           description: Поле `device` последней синхронизации как есть.
           example: PocketBook 740
+        library_book_id:
+          type: integer
+          format: int64
+          nullable: true
+          description: Книга библиотеки, которой принадлежит файл с этим хешем; `null`, если файла нет.
     BookCounts:
       type: object
       required: [all, reading, finished, unknown]

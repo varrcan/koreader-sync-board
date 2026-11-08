@@ -495,6 +495,50 @@ func TestTitleFromLibrary(t *testing.T) {
 	}
 }
 
+func TestLibraryBookID(t *testing.T) {
+	e := newReadEnv(t)
+	alice := e.user("alice")
+	pb := e.device("alice", "pocketbook")
+	for _, h := range []string{"partial", "byname", "dup", "unknown"} {
+		e.sync(pb, h, 0.1, time.Minute, Metadata{})
+	}
+	file := e.libFile("Пикник.epub", "Пикник", "Стругацкие", "partial", "byname")
+	first := e.libFile("first.epub", "Первая", "", "dup")
+	e.libFile("second.epub", "Вторая", "", "dup")
+	bookOf := func(fileID int64) int64 {
+		t.Helper()
+		var id int64
+		if err := e.s.db.Read.QueryRowContext(e.ctx, `SELECT book_id FROM library_files WHERE id = ?`, fileID).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+
+	got := map[string]Book{}
+	for _, b := range e.books(alice, FilterAll, 0, 50).Items {
+		got[b.Hash] = b
+	}
+	check := func(hash string, want int64, title string) {
+		t.Helper()
+		b := got[hash]
+		if b.LibraryBookID == nil || *b.LibraryBookID != want || str(b.Title) != title {
+			t.Errorf("%s: library book %v, title %s; want %d %s", hash, b.LibraryBookID, str(b.Title), want, title)
+		}
+	}
+	check("partial", bookOf(file), "Пикник")
+	check("byname", bookOf(file), "Пикник")
+	// При нескольких файлах ссылка ведёт в книгу, откуда взято название.
+	check("dup", bookOf(first), "Первая")
+	if id := got["unknown"].LibraryBookID; id != nil {
+		t.Errorf("unknown: library book %d", *id)
+	}
+
+	b, _, err := e.s.Book(e.ctx, alice, "byname")
+	if err != nil || b.LibraryBookID == nil || *b.LibraryBookID != bookOf(file) {
+		t.Fatalf("book card: %+v %v", b, err)
+	}
+}
+
 func TestToday(t *testing.T) {
 	e := newReadEnv(t)
 	e.user("alice")

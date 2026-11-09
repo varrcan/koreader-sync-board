@@ -189,6 +189,74 @@ func TestPanelDevicesE2E(t *testing.T) {
 	unauthorized("revoked", rotated)
 }
 
+// TestPanelUsersE2E: панель создаёт пользователя → вход выданным паролем →
+// отключение → читалка 401 → включение → читалка сразу снова 200.
+func TestPanelUsersE2E(t *testing.T) {
+	t.Setenv("KSB_DATA_DIR", t.TempDir())
+	t.Setenv("ADMIN_USER", "root")
+	t.Setenv("ADMIN_PASSWORD", "root-password")
+	base, _ := startServer(t)
+
+	root := newPanel(t, base, "198.51.100.40")
+	if code, body := root.call("POST", "/api/v1/auth/login", map[string]string{"username": "root", "password": "root-password"}); code != 200 {
+		t.Fatalf("root login: %d %v", code, body)
+	}
+	code, body := root.call("POST", "/api/v1/users", map[string]string{"username": "carol", "role": "user"})
+	if code != 201 || body["username"] != "carol" {
+		t.Fatalf("create user: %d %v", code, body)
+	}
+	carol := newPanel(t, base, "198.51.100.41")
+	if code, body := carol.call("POST", "/api/v1/auth/login", map[string]string{"username": "carol", "password": body["password"].(string)}); code != 200 {
+		t.Fatalf("carol login: %d %v", code, body)
+	}
+	code, body = carol.call("POST", "/api/v1/devices", map[string]string{"name": "Kobo"})
+	if code != 201 {
+		t.Fatalf("create device: %d %v", code, body)
+	}
+	kobo := reader{t: t, base: base, ip: "198.51.100.42", user: "carol", password: body["password"].(string)}
+	kobo.login().expect(t, "reader login", 200, "")
+
+	res, err := root.c.Get(base + "/api/v1/users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var list []map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	var id string
+	for _, u := range list {
+		if u["username"] == "carol" {
+			id = fmt.Sprintf("/api/v1/users/%.0f", u["id"])
+		}
+	}
+	if id == "" {
+		t.Fatalf("carol not listed: %v", list)
+	}
+
+	if code, body := root.call("PATCH", id, map[string]bool{"disabled": true}); code != 204 {
+		t.Fatalf("disable: %d %v", code, body)
+	}
+	// Дважды: второй отказ приходит из памяти отвергнутых ключей.
+	for range 2 {
+		if a := kobo.login(); a.status != 401 || a.body["code"] != float64(2001) {
+			t.Fatalf("disabled reader: %+v", a)
+		}
+	}
+	if code, _ := carol.call("GET", "/api/v1/me", nil); code != 401 {
+		t.Fatalf("disabled session: %d", code)
+	}
+
+	if code, body := root.call("PATCH", id, map[string]bool{"disabled": false}); code != 204 {
+		t.Fatalf("enable: %d %v", code, body)
+	}
+	kobo.login().expect(t, "reader after enable", 200, "")
+	if code, _ := carol.call("GET", "/api/v1/me", nil); code != 401 {
+		t.Fatalf("old session revived: %d", code)
+	}
+}
+
 // TestPanelProgressE2E: читалка шлёт прогресс с metadata и без → панель видит
 // книгу с названием и неизвестную книгу, ленту и устройства книги.
 func TestPanelProgressE2E(t *testing.T) {

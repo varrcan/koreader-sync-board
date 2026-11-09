@@ -73,15 +73,29 @@ export const menuComponents = Object.fromEntries(
   (Object.keys(koreaderMenu) as MenuItem[]).map((item) => [item, <MenuLabel item={item} />]),
 );
 
-/** Значение, которое переписывают в читалку, с кнопкой копирования. */
-export function Value({ label, value, large }: { label?: string; value: string; large?: boolean }) {
+/**
+ * Значение, которое переписывают в читалку, с кнопкой копирования. wrap — переносить
+ * вместо прокрутки: длинный разовый пароль на телефоне должен быть виден целиком.
+ */
+export function Value({
+  label,
+  value,
+  large,
+  wrap,
+}: {
+  label?: string;
+  value: string;
+  large?: boolean;
+  wrap?: boolean;
+}) {
   return (
     <div className="flex flex-col gap-1.5">
       {label && <span className="text-xs text-muted-foreground">{label}</span>}
       <div className="flex min-w-0 items-center justify-between gap-3 rounded-lg bg-muted py-2 pr-2 pl-3">
         <code
           className={cn(
-            "overflow-x-auto font-mono whitespace-nowrap",
+            "font-mono",
+            wrap ? "wrap-anywhere" : "overflow-x-auto whitespace-nowrap",
             large ? "text-lg tracking-wider" : "text-[13px]",
           )}
         >

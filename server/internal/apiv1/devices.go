@@ -90,24 +90,6 @@ func (s *Server) RevokeDevice(w http.ResponseWriter, r *http.Request, id DeviceI
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
-	cur, _ := panelauth.FromContext(r.Context())
-	if cur.User.Role != accounts.RoleAdmin {
-		writeError(w, http.StatusForbidden, "forbidden", "administrator role required")
-		return
-	}
-	users, err := s.Accounts.ListUsers(r.Context())
-	if err != nil {
-		s.internal(w, "list users", err)
-		return
-	}
-	out := make([]UserSummary, 0, len(users))
-	for _, u := range users {
-		out = append(out, UserSummary{Username: u.Username, Role: Role(u.Role), Disabled: u.DisabledAt != nil})
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
 // deviceFailed отвечает на ошибку операции с устройством. Устройство вне
 // области владельца сессии приходит как ErrNotFound и неотличимо от несуществующего.
 func (s *Server) deviceFailed(w http.ResponseWriter, op string, err error) bool {

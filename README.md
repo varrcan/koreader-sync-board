@@ -155,8 +155,14 @@ shown on the application page. For Keycloak or Authentik a `groups` claim works 
 
 ## Create a user and a device
 
-Users and devices are managed with the `ksb` CLI. It works on the same database while the
-server is running, and changes (for example, a revoked device) apply on the next request.
+Administrators manage users in the panel under **Users** (`/admin/users`, on a phone via
+**Account**): create a user, issue a new panel password, change the role, disable or enable,
+remove the OIDC link, delete. New and reset passwords are shown once. An administrator cannot
+apply these actions to their own account, so the panel cannot lock out its last administrator.
+
+Everything is also available in the `ksb` CLI, which has no such checks: it is the recovery
+path when nobody can sign in. It works on the same database while the server is running, and
+changes (for example, a revoked device) apply on the next request.
 
 ```sh
 docker exec ksb /ksb user add alice
@@ -171,10 +177,15 @@ cannot be shown again. Passwords issued by earlier versions in a longer format k
 docker exec ksb /ksb device list alice           # names, creation and last use, revoked flag
 docker exec ksb /ksb device revoke alice "Kindle"
 docker exec ksb /ksb user disable alice          # blocks all of alice's devices and panel sessions
+docker exec ksb /ksb user enable alice           # devices work again, old panel sessions do not
 docker exec ksb /ksb user delete alice           # removes devices, reading progress and statistics
 docker exec ksb /ksb user role alice admin       # or user
 docker exec ksb /ksb user oidc-unlink alice      # removes the OIDC link; `user list` shows links
 ```
+
+After `ksb user enable`, an e-reader that was refused while the user was disabled may get
+refused for up to 10 more minutes: the running server remembers rejected keys and the CLI is a
+separate process. Enabling the user in the panel applies immediately.
 
 ## Configure KOReader
 

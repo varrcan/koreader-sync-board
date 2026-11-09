@@ -1,6 +1,7 @@
 import type { Me } from "@ksb/api-client";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { getRouteApi } from "@tanstack/react-router";
+import { getRouteApi, Link } from "@tanstack/react-router";
+import { UsersRound } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ApiFailure, failure } from "@/api";
@@ -37,6 +38,16 @@ export function AccountPage() {
         <span className="text-sm">{t("theme.label")}</span>
         <ThemeToggle />
       </div>
+      {/* Пункта в мобильной шапке нет: администратор попадает к пользователям отсюда. */}
+      {me.role === "admin" && (
+        <Link
+          to="/admin/users"
+          className="flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-foreground md:hidden [&_svg]:size-4"
+        >
+          <UsersRound />
+          {t("nav.users")}
+        </Link>
+      )}
       {showPassword && <PasswordCard me={me} />}
       {methods.oidc && (
         <OIDCCard me={me} name={methods.oidc.name} origin={methods.oidc.origin} canSetPassword={showPassword} />

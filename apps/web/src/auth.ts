@@ -74,6 +74,8 @@ export function errorText(t: TFunction, err: unknown): string {
     case "cross_origin":
     case "not_found":
     case "user_not_found":
+    case "user_exists":
+    case "self_action":
     case "forbidden":
     case "device_exists":
     case "invalid_device_name":

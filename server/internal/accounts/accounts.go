@@ -138,9 +138,13 @@ type Principal struct {
 	KeyRev       int64
 }
 
+// cacheEntry — удачная проверка. keyHash привязывает запись к строке устройства:
+// id без AUTOINCREMENT достаются новым строкам снова, и у нового устройства могут
+// совпасть id и key_rev, а соль argon2 у него другая.
 type cacheEntry struct {
 	credentialID int64
 	keyRev       int64
+	keyHash      string
 	expires      time.Time
 }
 
@@ -484,9 +488,9 @@ func (s *Service) fromCache(ctx context.Context, ck [32]byte, userID int64, user
 	var lastUsed sql.NullInt64
 	err := s.db.Read.QueryRowContext(ctx, `
 		SELECT d.last_used_at FROM device_credentials d JOIN users u ON u.id = d.user_id
-		WHERE d.id = ? AND d.user_id = ? AND d.key_rev = ?
+		WHERE d.id = ? AND d.user_id = ? AND d.key_rev = ? AND d.key_hash = ?
 		  AND d.revoked_at IS NULL AND u.disabled_at IS NULL`,
-		e.credentialID, userID, e.keyRev).Scan(&lastUsed)
+		e.credentialID, userID, e.keyRev, e.keyHash).Scan(&lastUsed)
 	switch {
 	case err == nil:
 		e.expires = s.now().Add(cacheTTL)
@@ -518,7 +522,7 @@ func (s *Service) verifyCredentials(ctx context.Context, ck [32]byte, userID int
 	}
 	for _, c := range creds {
 		if s.verify(key, c.hash) {
-			s.store(ck, cacheEntry{credentialID: c.id, keyRev: c.rev, expires: s.now().Add(cacheTTL)})
+			s.store(ck, cacheEntry{credentialID: c.id, keyRev: c.rev, keyHash: c.hash, expires: s.now().Add(cacheTTL)})
 			p := Principal{UserID: userID, Username: username, CredentialID: c.id, KeyRev: c.rev}
 			return p, s.touch(ctx, c.id, c.lastUsed)
 		}

@@ -18,6 +18,7 @@
     "statistics": "Statistics",
     "account": "Account",
     "devices": "Devices",
+    "users": "Users",
     "help": "Help"
   },
   "roles": {
@@ -193,6 +194,86 @@
       "step3Hint": "The vocabulary builder syncs the same way from its own settings."
     },
     "changePassword": "Panel password and sign-in"
+  },
+  "users": {
+    "title": "Users",
+    "description": "Accounts on this server. Change your own account under “Account”.",
+    "add": "Add user",
+    "loading": "Loading…",
+    "loadError": "Could not load users.",
+    "you": "You",
+    "disabled": "Disabled",
+    "menu": "Actions",
+    "cancel": "Cancel",
+    "username": "Username",
+    "role": "Role",
+    "hasPassword": "panel password",
+    "noPassword": "no panel password",
+    "oidc": "OIDC",
+    "devices": "devices: {{count}}",
+    "created": "created {{date}}",
+    "lastActive": "active {{when}}",
+    "noActivity": "no activity yet",
+    "createDialog": {
+      "title": "New user",
+      "description": "The server generates a panel password and shows it once.",
+      "submit": "Create"
+    },
+    "actions": {
+      "roleOidcNote": "This account is linked to OIDC: if the role comes from the provider, the next sign-in applies it again.",
+      "promote": {
+        "item": "Make administrator",
+        "title": "Make “{{name}}” an administrator?",
+        "description": "Grants management of users, everyone's devices and the library. Takes effect immediately.",
+        "confirm": "Make administrator"
+      },
+      "demote": {
+        "item": "Remove administrator role",
+        "title": "Remove the administrator role from “{{name}}”?",
+        "description": "Management of users, other people's devices and the library closes immediately. Books, progress and devices stay.",
+        "confirm": "Remove role"
+      },
+      "disable": {
+        "item": "Disable",
+        "title": "Disable “{{name}}”?",
+        "description": "The panel, e-readers, WebDAV and OPDS stop working for this account immediately. Data is kept, and you can enable it at any time.",
+        "confirm": "Disable"
+      },
+      "enable": {
+        "item": "Enable",
+        "title": "Enable “{{name}}”?",
+        "description": "Devices that are not revoked work again. Panel sessions opened before the account was disabled do not return: sign in again.",
+        "confirm": "Enable"
+      },
+      "reset": {
+        "item": "Issue new password",
+        "title": "New panel password for “{{name}}”?",
+        "description": "The current password stops working and all panel sessions close. Devices keep syncing.",
+        "confirm": "Issue password"
+      },
+      "unlink": {
+        "item": "Remove OIDC link",
+        "title": "Remove the OIDC link from “{{name}}”?",
+        "description": "Signing in through the provider will no longer open this account.",
+        "confirm": "Remove link",
+        "noPasswordNote": "This account has no panel password: signing in is impossible until a new password is issued."
+      },
+      "delete": {
+        "item": "Delete",
+        "title": "Delete “{{name}}”?",
+        "description": "Devices, sessions, reading progress, WebDAV files and statistics will be deleted. This cannot be undone. The library does not change.",
+        "confirm": "Delete forever",
+        "oidcNote": "This account is linked to OIDC: with auto-creation on, the next sign-in through the provider creates a new empty account."
+      }
+    },
+    "passwordDialog": {
+      "title": "Password for “{{name}}”",
+      "once": "This password is shown only now. Hand it to the account owner.",
+      "address": "Panel address",
+      "password": "Panel password",
+      "devicesHint": "E-readers are added after signing in, on the Devices screen: each has its own password. The issued password can be changed under “Account”.",
+      "done": "Done"
+    }
   },
   "common": {
     "loading": "Loading…",
@@ -379,6 +460,8 @@
     "cross_origin": "Request rejected: it came from another site.",
     "not_found": "Device not found: it may have been revoked already.",
     "user_not_found": "User not found: it may have been deleted.",
+    "user_exists": "A user with this name already exists.",
+    "self_action": "This action cannot be applied to your own account.",
     "forbidden": "You do not have permission to do this.",
     "device_exists": "A device with this name already exists.",
     "invalid_device_name": "The name must be 1 to 64 characters long.",

@@ -327,12 +327,92 @@ export interface paths {
         };
         /**
          * Пользователи
-         * @description Только администратору — для выбора владельца нового устройства.
+         * @description Только администратору — для экрана пользователей и выбора владельца нового устройства.
          */
         get: operations["listUsers"];
         put?: never;
-        post?: never;
+        /**
+         * Создать пользователя
+         * @description Создаёт пользователя со сгенерированным паролем панели и возвращает пароль.
+         *     Пароль показывается только в этом ответе. Только администратору.
+         */
+        post: operations["createUser"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Удалить пользователя
+         * @description Удаляет другого пользователя с устройствами, сессиями, прогрессом, файлами
+         *     WebDAV и статистикой чтения. Общие реестр документов и библиотека не меняются.
+         */
+        delete: operations["deleteUser"];
+        options?: never;
+        head?: never;
+        /**
+         * Изменить роль или статус
+         * @description Меняет указанные поля другого пользователя. Отключение действует на следующем
+         *     запросе к панели, kosync, WebDAV и OPDS. Включение отключённого удаляет его
+         *     сессии и сразу возвращает работу неотозванным устройствам.
+         */
+        patch: operations["updateUser"];
+        trace?: never;
+    };
+    "/api/v1/users/{id}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Новый пароль панели
+         * @description Выдаёт другому пользователю новый пароль панели, возвращает его один раз и
+         *     закрывает все сессии этого пользователя. Ключи устройств не меняются.
+         */
+        post: operations["resetUserPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{id}/oidc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Снять привязку OIDC
+         * @description Удаляет привязку OIDC другого пользователя. Непривязанный пользователь — не
+         *     ошибка. Наличие пароля панели не проверяется: его можно выдать сбросом.
+         */
+        delete: operations["unlinkUserOIDC"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1179,9 +1259,40 @@ export interface components {
             name: components["schemas"]["DeviceName"];
         };
         UserSummary: {
+            /** Format: int64 */
+            id: number;
             username: string;
             role: components["schemas"]["Role"];
             disabled: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Задан пароль панели. */
+            has_password: boolean;
+            oidc_linked: boolean;
+            /** @description Неотозванные устройства. */
+            device_count: number;
+            /**
+             * Format: date-time
+             * @description Последнее использование устройства (в том числе отозванного) или сессии.
+             */
+            last_active_at: string | null;
+        };
+        CreateUserRequest: {
+            username: string;
+            role: components["schemas"]["Role"];
+        };
+        /** @description Нужно хотя бы одно поле. */
+        UpdateUserRequest: {
+            role?: components["schemas"]["Role"];
+            disabled?: boolean;
+        };
+        IssuedUserPassword: {
+            username: string;
+            /**
+             * @description Пароль панели; больше нигде не показывается.
+             * @example abcd-efgh-ijkl-mnop
+             */
+            password: string;
         };
         /** @enum {string} */
         BookFilter: "reading" | "finished" | "unknown";
@@ -1544,6 +1655,24 @@ export interface components {
                 "application/json": components["schemas"]["Error"];
             };
         };
+        /** @description `user_not_found`: пользователя нет */
+        UserNotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description `self_action`: действие над собственной учётной записью */
+        SelfAction: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description `device_exists`: у владельца есть действующее устройство с таким именем */
         DeviceExists: {
             headers: {
@@ -1597,6 +1726,7 @@ export interface components {
         LibraryFileID: number;
         LibraryRootID: number;
         DeviceID: number;
+        UserID: number;
         /** @description Хеш документа, как его прислала читалка. */
         BookHash: string;
         /** @description Размер страницы. */
@@ -2179,6 +2309,169 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Пользователь создан */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuedUserPassword"];
+                };
+            };
+            /** @description `invalid_username` или `bad_request` (неизвестная роль) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description `user_exists`: имя занято */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Пользователь удалён */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["UserNotFound"];
+            409: components["responses"]["SelfAction"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Пользователь изменён */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["UserNotFound"];
+            409: components["responses"]["SelfAction"];
+            default: components["responses"]["Error"];
+        };
+    };
+    resetUserPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Новый пароль */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IssuedUserPassword"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /**
+             * @description `forbidden` или `password_login_disabled`: вход по паролю выключен, а
+             *     пользователь привязан к OIDC.
+             */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            404: components["responses"]["UserNotFound"];
+            409: components["responses"]["SelfAction"];
+            default: components["responses"]["Error"];
+        };
+    };
+    unlinkUserOIDC: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["UserID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Привязки больше нет */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["UserNotFound"];
+            409: components["responses"]["SelfAction"];
             default: components["responses"]["Error"];
         };
     };

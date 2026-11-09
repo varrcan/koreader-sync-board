@@ -21,6 +21,7 @@ import { LibraryRootsPage } from "./pages/LibraryRootsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { SetupPage } from "./pages/SetupPage";
 import { StatisticsPage } from "./pages/StatisticsPage";
+import { UsersPage } from "./pages/UsersPage";
 
 function Root() {
   const { t, i18n } = useTranslation();
@@ -144,6 +145,18 @@ const devicesRoute = createRoute({
   component: DevicesPage,
 });
 
+// Не /users: этот префикс принадлежит kosync, и обновление страницы ушло бы в протокол.
+const usersRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/admin/users",
+  beforeLoad: async () => {
+    const me = await queryClient.ensureQueryData(meQuery);
+    if (me?.role !== "admin") throw redirect({ to: "/", replace: true });
+    await queryClient.ensureQueryData(methodsQuery);
+  },
+  component: UsersPage,
+});
+
 // Результат привязки OIDC: сервер возвращает браузер сюда с oidc=linked или oidc_error.
 const accountRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -209,6 +222,7 @@ const routeTree = rootRoute.addChildren([
     libraryBookRoute,
     statisticsRoute,
     devicesRoute,
+    usersRoute,
     accountRoute,
     passwordRoute,
     helpRoute,

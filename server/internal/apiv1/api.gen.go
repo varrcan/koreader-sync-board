@@ -337,6 +337,12 @@ type CreateLibraryRootRequest struct {
 	Path string `json:"path"`
 }
 
+// CreateUserRequest defines model for CreateUserRequest.
+type CreateUserRequest struct {
+	Role     Role   `json:"role"`
+	Username string `json:"username"`
+}
+
 // Device defines model for Device.
 type Device struct {
 	CreatedAt  time.Time  `json:"created_at"`
@@ -387,6 +393,15 @@ type Health struct {
 
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
+
+// IssuedUserPassword defines model for IssuedUserPassword.
+type IssuedUserPassword struct {
+	// Password Пароль панели; больше нигде не показывается.
+	//
+	// Example: abcd-efgh-ijkl-mnop
+	Password string `json:"password"`
+	Username string `json:"username"`
+}
 
 // LibraryBook defines model for LibraryBook.
 type LibraryBook struct {
@@ -812,11 +827,29 @@ type StatisticsTotals struct {
 	Sessions int `json:"sessions"`
 }
 
+// UpdateUserRequest Нужно хотя бы одно поле.
+type UpdateUserRequest struct {
+	Disabled *bool `json:"disabled,omitempty"`
+	Role     *Role `json:"role,omitempty"`
+}
+
 // UserSummary defines model for UserSummary.
 type UserSummary struct {
-	Disabled bool   `json:"disabled"`
-	Role     Role   `json:"role"`
-	Username string `json:"username"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// DeviceCount Неотозванные устройства.
+	DeviceCount int  `json:"device_count"`
+	Disabled    bool `json:"disabled"`
+
+	// HasPassword Задан пароль панели.
+	HasPassword bool  `json:"has_password"`
+	Id          int64 `json:"id"`
+
+	// LastActiveAt Последнее использование устройства (в том числе отозванного) или сессии.
+	LastActiveAt *time.Time `json:"last_active_at"`
+	OidcLinked   bool       `json:"oidc_linked"`
+	Role         Role       `json:"role"`
+	Username     string     `json:"username"`
 }
 
 // Version defines model for Version.
@@ -852,6 +885,9 @@ type Limit = int
 // TimeZone Example: Europe/Moscow
 type TimeZone = string
 
+// UserID defines model for UserID.
+type UserID = int64
+
 // BadRequest defines model for BadRequest.
 type BadRequest = Error
 
@@ -876,11 +912,17 @@ type NotFound = Error
 // OIDCNotConfigured defines model for OIDCNotConfigured.
 type OIDCNotConfigured = Error
 
+// SelfAction defines model for SelfAction.
+type SelfAction = Error
+
 // TooManyAttempts defines model for TooManyAttempts.
 type TooManyAttempts = Error
 
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = Error
+
+// UserNotFound defines model for UserNotFound.
+type UserNotFound = Error
 
 // ListActivityParams defines parameters for ListActivity.
 type ListActivityParams struct {
@@ -1003,6 +1045,12 @@ type ChangePasswordJSONRequestBody = ChangePasswordRequest
 
 // CompleteSetupJSONRequestBody defines body for CompleteSetup for application/json ContentType.
 type CompleteSetupJSONRequestBody = SetupRequest
+
+// CreateUserJSONRequestBody defines body for CreateUser for application/json ContentType.
+type CreateUserJSONRequestBody = CreateUserRequest
+
+// UpdateUserJSONRequestBody defines body for UpdateUser for application/json ContentType.
+type UpdateUserJSONRequestBody = UpdateUserRequest
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -1135,6 +1183,21 @@ type ServerInterface interface {
 	// ListUsers Пользователи
 	// (GET /api/v1/users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
+	// CreateUser Создать пользователя
+	// (POST /api/v1/users)
+	CreateUser(w http.ResponseWriter, r *http.Request)
+	// DeleteUser Удалить пользователя
+	// (DELETE /api/v1/users/{id})
+	DeleteUser(w http.ResponseWriter, r *http.Request, id UserID)
+	// UpdateUser Изменить роль или статус
+	// (PATCH /api/v1/users/{id})
+	UpdateUser(w http.ResponseWriter, r *http.Request, id UserID)
+	// UnlinkUserOIDC Снять привязку OIDC
+	// (DELETE /api/v1/users/{id}/oidc)
+	UnlinkUserOIDC(w http.ResponseWriter, r *http.Request, id UserID)
+	// ResetUserPassword Новый пароль панели
+	// (POST /api/v1/users/{id}/password)
+	ResetUserPassword(w http.ResponseWriter, r *http.Request, id UserID)
 	// GetVersion Версия сборки
 	// (GET /api/v1/version)
 	GetVersion(w http.ResponseWriter, r *http.Request)
@@ -2296,6 +2359,124 @@ func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// CreateUser operation middleware
+func (siw *ServerInterfaceWrapper) CreateUser(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateUser(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteUser operation middleware
+func (siw *ServerInterfaceWrapper) DeleteUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UserID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteUser(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateUser operation middleware
+func (siw *ServerInterfaceWrapper) UpdateUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UserID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateUser(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UnlinkUserOIDC operation middleware
+func (siw *ServerInterfaceWrapper) UnlinkUserOIDC(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UserID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UnlinkUserOIDC(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResetUserPassword operation middleware
+func (siw *ServerInterfaceWrapper) ResetUserPassword(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id UserID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResetUserPassword(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetVersion operation middleware
 func (siw *ServerInterfaceWrapper) GetVersion(w http.ResponseWriter, r *http.Request) {
 
@@ -2449,6 +2630,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/devices/{id}", wrapper.RenameDevice)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/devices/{id}/password", wrapper.ResetDevicePassword)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/users", wrapper.ListUsers)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/users", wrapper.CreateUser)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/users/{id}", wrapper.DeleteUser)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/users/{id}", wrapper.UpdateUser)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/users/{id}/password", wrapper.ResetUserPassword)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/users/{id}/oidc", wrapper.UnlinkUserOIDC)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books", wrapper.ListBooks)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books/{hash}", wrapper.GetBook)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books/{hash}/statistics", wrapper.GetBookStatistics)

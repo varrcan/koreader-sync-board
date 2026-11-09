@@ -1,7 +1,7 @@
 // Команда ksb — сервер koreader-sync-board и CLI управления им.
 //
 //	ksb serve                               запустить сервер
-//	ksb user add|list|disable|delete|passwd|role|oidc-unlink управление пользователями
+//	ksb user add|list|disable|enable|delete|passwd|role|oidc-unlink управление пользователями
 //	ksb device add|list|revoke              управление устройствами
 //	ksb healthcheck                         проверка работоспособности (для Docker HEALTHCHECK)
 //	ksb version
@@ -33,6 +33,7 @@ commands:
   user add <name> [-role admin|user]
   user list
   user disable <name>
+  user enable <name>             also closes the panel sessions of a disabled user
   user delete <name>
   user passwd <name>             prints a new panel password once
   user role <name> admin|user

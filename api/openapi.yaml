@@ -504,7 +504,7 @@ paths:
     get:
       operationId: listUsers
       summary: Пользователи
-      description: Только администратору — для выбора владельца нового устройства.
+      description: Только администратору — для экрана пользователей и выбора владельца нового устройства.
       tags: [users]
       responses:
         "200":
@@ -519,6 +519,152 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
+    post:
+      operationId: createUser
+      summary: Создать пользователя
+      description: |
+        Создаёт пользователя со сгенерированным паролем панели и возвращает пароль.
+        Пароль показывается только в этом ответе. Только администратору.
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "201":
+          description: Пользователь создан
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedUserPassword"
+        "400":
+          description: "`invalid_username` или `bad_request` (неизвестная роль)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          description: "`user_exists`: имя занято"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/users/{id}:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    patch:
+      operationId: updateUser
+      summary: Изменить роль или статус
+      description: |
+        Меняет указанные поля другого пользователя. Отключение действует на следующем
+        запросе к панели, kosync, WebDAV и OPDS. Включение отключённого удаляет его
+        сессии и сразу возвращает работу неотозванным устройствам.
+      tags: [users]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserRequest"
+      responses:
+        "204":
+          description: Пользователь изменён
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/UserNotFound"
+        "409":
+          $ref: "#/components/responses/SelfAction"
+        default:
+          $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteUser
+      summary: Удалить пользователя
+      description: |
+        Удаляет другого пользователя с устройствами, сессиями, прогрессом, файлами
+        WebDAV и статистикой чтения. Общие реестр документов и библиотека не меняются.
+      tags: [users]
+      responses:
+        "204":
+          description: Пользователь удалён
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/UserNotFound"
+        "409":
+          $ref: "#/components/responses/SelfAction"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/users/{id}/password:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    post:
+      operationId: resetUserPassword
+      summary: Новый пароль панели
+      description: |
+        Выдаёт другому пользователю новый пароль панели, возвращает его один раз и
+        закрывает все сессии этого пользователя. Ключи устройств не меняются.
+      tags: [users]
+      responses:
+        "200":
+          description: Новый пароль
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IssuedUserPassword"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: |
+            `forbidden` или `password_login_disabled`: вход по паролю выключен, а
+            пользователь привязан к OIDC.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/UserNotFound"
+        "409":
+          $ref: "#/components/responses/SelfAction"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/users/{id}/oidc:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    delete:
+      operationId: unlinkUserOIDC
+      summary: Снять привязку OIDC
+      description: |
+        Удаляет привязку OIDC другого пользователя. Непривязанный пользователь — не
+        ошибка. Наличие пароля панели не проверяется: его можно выдать сбросом.
+      tags: [users]
+      responses:
+        "204":
+          description: Привязки больше нет
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/UserNotFound"
+        "409":
+          $ref: "#/components/responses/SelfAction"
         default:
           $ref: "#/components/responses/Error"
   /api/v1/books:
@@ -1349,6 +1495,13 @@ components:
       schema:
         type: integer
         format: int64
+    UserID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
     BookHash:
       name: hash
       in: path
@@ -1425,6 +1578,18 @@ components:
             $ref: "#/components/schemas/Error"
     Forbidden:
       description: "`forbidden`: операция только для администратора"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UserNotFound:
+      description: "`user_not_found`: пользователя нет"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    SelfAction:
+      description: "`self_action`: действие над собственной учётной записью"
       content:
         application/json:
           schema:
@@ -1980,14 +2145,59 @@ components:
           $ref: "#/components/schemas/DeviceName"
     UserSummary:
       type: object
-      required: [username, role, disabled]
+      required: [id, username, role, disabled, created_at, has_password, oidc_linked, device_count, last_active_at]
       properties:
+        id:
+          type: integer
+          format: int64
         username:
           type: string
         role:
           $ref: "#/components/schemas/Role"
         disabled:
           type: boolean
+        created_at:
+          type: string
+          format: date-time
+        has_password:
+          type: boolean
+          description: Задан пароль панели.
+        oidc_linked:
+          type: boolean
+        device_count:
+          type: integer
+          description: Неотозванные устройства.
+        last_active_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Последнее использование устройства (в том числе отозванного) или сессии.
+    CreateUserRequest:
+      type: object
+      required: [username, role]
+      properties:
+        username:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+    UpdateUserRequest:
+      type: object
+      description: Нужно хотя бы одно поле.
+      properties:
+        role:
+          $ref: "#/components/schemas/Role"
+        disabled:
+          type: boolean
+    IssuedUserPassword:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          description: Пароль панели; больше нигде не показывается.
+          example: abcd-efgh-ijkl-mnop
     BookFilter:
       type: string
       enum: [reading, finished, unknown]

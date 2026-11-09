@@ -1,4 +1,4 @@
-import type { Device, DeviceWithPassword, Me, UserSummary } from "@ksb/api-client";
+import type { Device, DeviceWithPassword, Me } from "@ksb/api-client";
 import { queryOptions, useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ExternalLink } from "lucide-react";
@@ -31,20 +31,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { usersQuery } from "@/users";
 
 export const devicesQuery = queryOptions({
   queryKey: ["devices"],
   queryFn: async (): Promise<Device[]> => {
     const { data, error, response } = await api.GET("/api/v1/devices");
-    if (error) throw failure(error, response);
-    return data;
-  },
-});
-
-const usersQuery = queryOptions({
-  queryKey: ["users"],
-  queryFn: async (): Promise<UserSummary[]> => {
-    const { data, error, response } = await api.GET("/api/v1/users");
     if (error) throw failure(error, response);
     return data;
   },

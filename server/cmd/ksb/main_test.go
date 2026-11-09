@@ -130,6 +130,75 @@ func TestUserPasswd(t *testing.T) {
 	}
 }
 
+func TestUserEnable(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("KSB_DATA_DIR", dir)
+	ksb := func(args ...string) (string, int) {
+		var out, errb bytes.Buffer
+		code := run(args, &out, &errb)
+		return out.String() + errb.String(), code
+	}
+	if out, code := ksb("user", "add", "alice"); code != 0 {
+		t.Fatal(out)
+	}
+	out, code := ksb("device", "add", "alice", "Kindle")
+	device := regexp.MustCompile(`(?m)^  password: (\S+)$`).FindStringSubmatch(out)
+	if code != 0 || device == nil {
+		t.Fatalf("device add: %s", out)
+	}
+
+	ctx := context.Background()
+	db, err := store.Open(ctx, filepath.Join(dir, store.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	acc := accounts.New(db)
+	var id int64
+	if err := db.Read.QueryRow(`SELECT id FROM users WHERE username = 'alice'`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	session := func() string {
+		t.Helper()
+		token, _, err := acc.CreateSession(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	client := netip.MustParseAddr("192.0.2.1")
+
+	// Не отключена: успех, сессия цела.
+	alive := session()
+	if out, code := ksb("user", "enable", "alice"); code != 0 {
+		t.Fatalf("enable enabled: %d %s", code, out)
+	}
+	if _, _, err := acc.SessionByToken(ctx, alive); err != nil {
+		t.Fatalf("session lost: %v", err)
+	}
+
+	stale := session()
+	if out, code := ksb("user", "disable", "alice"); code != 0 {
+		t.Fatal(out)
+	}
+	if out, code := ksb("user", "enable", "alice"); code != 0 || !strings.Contains(out, "enabled") {
+		t.Fatalf("enable: %d %s", code, out)
+	}
+	if _, _, err := acc.SessionByToken(ctx, stale); !errors.Is(err, accounts.ErrUnauthorized) {
+		t.Fatalf("session revived: %v", err)
+	}
+	if _, err := acc.Authenticate(ctx, "alice", accounts.KeyFromPassword(device[1]), client); err != nil {
+		t.Fatalf("device after enable: %v", err)
+	}
+
+	if out, code := ksb("user", "enable", "ghost"); code != 1 || !strings.Contains(out, "not found") {
+		t.Fatalf("unknown user: %d %s", code, out)
+	}
+	if _, code := ksb("user", "enable"); code != 2 {
+		t.Fatal("missing name should exit 2")
+	}
+}
+
 func TestUserRoleAndOIDCUnlink(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("KSB_DATA_DIR", dir)

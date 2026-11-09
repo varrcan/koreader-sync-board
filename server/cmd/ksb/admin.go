@@ -73,6 +73,18 @@ func userCmd(ctx context.Context, cfg config.Config, args []string, out io.Write
 			fmt.Fprintf(out, "user %q disabled\n", name)
 			return nil
 		})
+	case "enable":
+		name, err := oneArg(flag.NewFlagSet("user enable", flag.ContinueOnError), args, "user enable <name>")
+		if err != nil {
+			return err
+		}
+		return withAccounts(ctx, cfg, func(s *accounts.Service) error {
+			if err := s.EnableUser(ctx, name); err != nil {
+				return fmt.Errorf("user %q: %w", name, err)
+			}
+			fmt.Fprintf(out, "user %q enabled\n", name)
+			return nil
+		})
 	case "passwd":
 		name, err := oneArg(flag.NewFlagSet("user passwd", flag.ContinueOnError), args, "user passwd <name>")
 		if err != nil {

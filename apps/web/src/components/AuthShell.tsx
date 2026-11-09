@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { LanguageSelect } from "./LanguageSelect";
 import { Logo } from "./Logo";
+import { ThemeToggle } from "./ThemeToggle";
 
 /** Экран без сессии (вход, мастер): логотип, язык и карточка по центру. */
 export function AuthShell({ children }: { children: ReactNode }) {
@@ -8,7 +9,10 @@ export function AuthShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-svh flex-col">
       <header className="flex items-center justify-between px-4 py-4 sm:px-8">
         <Logo />
-        <LanguageSelect />
+        <div className="flex items-center gap-1">
+          <LanguageSelect />
+          <ThemeToggle />
+        </div>
       </header>
       <main className="flex flex-1 items-start justify-center px-4 pt-6 pb-16 sm:items-center sm:pt-0">{children}</main>
     </div>

@@ -17,6 +17,7 @@ import { meQuery, signedOut } from "@/auth";
 import { Button } from "@/components/ui/button";
 import { LanguageSelect } from "./LanguageSelect";
 import { Logo } from "./Logo";
+import { ThemeToggle } from "./ThemeToggle";
 
 function NavLink({
   to,
@@ -116,7 +117,10 @@ export function AppLayout() {
             {user}
             {logoutButton}
           </div>
-          <LanguageSelect className="self-start" />
+          <div className="flex items-center justify-between gap-2">
+            <LanguageSelect />
+            <ThemeToggle />
+          </div>
         </div>
       </aside>
 

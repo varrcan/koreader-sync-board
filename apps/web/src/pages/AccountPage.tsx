@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { api, ApiFailure, failure } from "@/api";
 import { errorText, meQuery, methodsQuery, queryClient } from "@/auth";
 import { FormError } from "@/components/FormError";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -30,6 +31,11 @@ export function AccountPage() {
       <div className="flex max-w-md flex-col gap-1.5">
         <h1 className="font-serif text-[clamp(24px,4vw,30px)] leading-tight font-medium">{t("account.title")}</h1>
         <p className="text-sm text-pretty text-muted-foreground">{t("account.description")}</p>
+      </div>
+      {/* В мобильной шапке места нет: на телефоне тема переключается здесь. */}
+      <div className="flex w-full max-w-md items-center justify-between gap-2 md:hidden">
+        <span className="text-sm">{t("theme.label")}</span>
+        <ThemeToggle />
       </div>
       {showPassword && <PasswordCard me={me} />}
       {methods.oidc && (

@@ -1,10 +1,15 @@
 {
   "app": {
     "title": "KOReader Sync Board",
-    "brand": "sync board"
+    "brand": "Sync Board"
   },
   "language": {
     "label": "Language"
+  },
+  "theme": {
+    "label": "Theme",
+    "light": "Light theme",
+    "dark": "Dark theme"
   },
   "nav": {
     "home": "Home",

@@ -8,8 +8,10 @@
 @custom-variant dark (&:is(.dark *));
 
 /* Токены — из ThemeKit макетов (Claude Design). Тёмная тема основная: класс
-   dark стоит на <html> в index.html. */
+   dark стоит на <html> в index.html, светлую включает ThemeToggle. color-scheme
+   задан явно, иначе полосы прокрутки и списки <select> следуют теме ОС. */
 :root {
+  color-scheme: light;
   --radius: 0.5rem;
   --background: oklch(0.982 0.004 250);
   --foreground: oklch(0.23 0.025 260);
@@ -45,6 +47,7 @@
 }
 
 .dark {
+  color-scheme: dark;
   --background: oklch(0.17 0.018 260);
   --foreground: oklch(0.94 0.01 250);
   --card: oklch(0.205 0.02 260);

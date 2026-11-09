@@ -81,6 +81,11 @@ export function errorText(t: TFunction, err: unknown): string {
     case "root_exists":
     case "root_overlap":
     case "single_file":
+    case "not_convertible":
+    case "conversion_failed":
+    case "conversion_timeout":
+    case "not_converted":
+    case "file_unavailable":
     case "invalid_metadata":
     case "cover_unavailable":
     case "invalid_statistics":

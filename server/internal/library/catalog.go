@@ -58,14 +58,17 @@ type FileProgress struct {
 }
 
 // File — файл книги библиотеки. Progress — nil, если пользователь его не читал.
+// Converted — файл создан конвертацией, Convertible — это FB2, и результата для его
+// содержимого нет.
 type File struct {
-	ID             int64
-	RootName, Path string
-	Format         string
-	Size           int64
-	Title, Authors *string
-	Pinned         bool
-	Progress       *FileProgress
+	ID                     int64
+	RootName, Path         string
+	Format                 string
+	Size                   int64
+	Title, Authors         *string
+	Pinned                 bool
+	Converted, Convertible bool
+	Progress               *FileProgress
 }
 
 // BookDetail — книга и её файлы по возрастанию id. Description и Metadata — nil,
@@ -77,14 +80,17 @@ type BookDetail struct {
 	Metadata    *MetadataInfo
 }
 
-// FileLocation — где файл лежит на диске.
+// FileLocation — где файл лежит на диске и его partial MD5.
 type FileLocation struct {
-	Root, Path, Format string
+	Root, Path, Format, PartialMD5 string
 }
 
 // wordCond — слово запроса входит в метаданные книги или в путь одного из её файлов.
+// У сконвертированного файла каталог — хеш (32 символа и «/»): его шестнадцатеричные
+// цифры находились бы по словам вроде «face» и «2012».
 const wordCond = ` AND (instr(ksb_fold(concat_ws(' ', lb.title, lb.authors, lb.series)), ?) > 0
-	OR EXISTS (SELECT 1 FROM library_files f WHERE f.book_id = lb.id AND instr(ksb_fold(f.path), ?) > 0))`
+	OR EXISTS (SELECT 1 FROM library_files f WHERE f.book_id = lb.id
+		AND instr(ksb_fold(iif(f.source_md5 IS NULL, f.path, substr(f.path, 34))), ?) > 0))`
 
 const bookSelect = `SELECT lb.id, lb.title, lb.authors, lb.series, lb.series_index, lb.language,
 	(SELECT m.cover FROM library_book_meta m WHERE m.book_id = lb.id) FROM library_books lb`
@@ -233,7 +239,9 @@ func fillFiles(ctx context.Context, tx *sql.Tx, books []Book) error {
 
 func bookFiles(ctx context.Context, tx *sql.Tx, bookID int64) ([]File, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT f.id, r.name, f.path, f.format, f.size, f.title, f.authors, f.pinned
+		SELECT f.id, r.name, f.path, f.format, f.size, f.title, f.authors, f.pinned, r.managed,
+			f.format IN ('fb2', 'fb2.zip')
+				AND NOT EXISTS (SELECT 1 FROM library_files c WHERE c.source_md5 = f.partial_md5)
 		FROM library_files f JOIN library_roots r ON r.id = f.root_id
 		WHERE f.book_id = ? ORDER BY f.id`, bookID)
 	if err != nil {
@@ -246,7 +254,8 @@ func bookFiles(ctx context.Context, tx *sql.Tx, bookID int64) ([]File, error) {
 			f              File
 			title, authors sql.NullString
 		)
-		if err := rows.Scan(&f.ID, &f.RootName, &f.Path, &f.Format, &f.Size, &title, &authors, &f.Pinned); err != nil {
+		if err := rows.Scan(&f.ID, &f.RootName, &f.Path, &f.Format, &f.Size, &title, &authors, &f.Pinned,
+			&f.Converted, &f.Convertible); err != nil {
 			return nil, err
 		}
 		f.Title, f.Authors = nullable(title), nullable(authors)
@@ -297,8 +306,8 @@ func fillProgress(ctx context.Context, tx *sql.Tx, bookID, userID int64, files [
 func (s *Store) FileLocation(ctx context.Context, id int64) (FileLocation, error) {
 	var l FileLocation
 	err := s.db.Read.QueryRowContext(ctx, `
-		SELECT r.path, f.path, f.format FROM library_files f
-		JOIN library_roots r ON r.id = f.root_id WHERE f.id = ?`, id).Scan(&l.Root, &l.Path, &l.Format)
+		SELECT r.path, f.path, f.format, f.partial_md5 FROM library_files f
+		JOIN library_roots r ON r.id = f.root_id WHERE f.id = ?`, id).Scan(&l.Root, &l.Path, &l.Format, &l.PartialMD5)
 	if errors.Is(err, sql.ErrNoRows) {
 		return FileLocation{}, ErrFileNotFound
 	}

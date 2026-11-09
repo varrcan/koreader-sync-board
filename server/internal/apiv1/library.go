@@ -12,7 +12,9 @@ import (
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
 	"github.com/varrcan/koreader-sync-board/server/internal/library"
+	"github.com/varrcan/koreader-sync-board/server/internal/library/convert"
 	"github.com/varrcan/koreader-sync-board/server/internal/library/lookup"
+	"github.com/varrcan/koreader-sync-board/server/internal/library/meta"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 )
 
@@ -22,6 +24,8 @@ const (
 	// мегабайт по каналу ~1 Мбит/с укладывается, а зависший клиент не держит
 	// соединение вечно. Обрыв докачивается через Range.
 	downloadTimeout = 30 * time.Minute
+	// convertResponseTimeout заменяет общий срок записи: ответ ждёт конвертацию.
+	convertResponseTimeout = convert.Timeout + time.Minute
 )
 
 // contentTypes — Content-Type файла по формату индекса.
@@ -44,6 +48,7 @@ type Library struct {
 	Files       library.FileReader
 	Lookup      MetadataLookup
 	CoverSource CoverSource
+	Converter   *convert.Service
 }
 
 // MetadataLookup ищет кандидатов во внешних каталогах.
@@ -224,6 +229,53 @@ func (s *Server) SplitLibraryFile(w http.ResponseWriter, r *http.Request, id Lib
 	s.writeLibraryBook(w, r, http.StatusCreated, book)
 }
 
+// ConvertLibraryFile ждёт результат. Отключение клиента конвертацию не прерывает, и
+// следующий запрос получит готовый файл.
+func (s *Server) ConvertLibraryFile(w http.ResponseWriter, r *http.Request, id LibraryFileID) {
+	// ResponseRecorder сроков не поддерживает, ошибка не важна.
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(convertResponseTimeout))
+	file, err := s.Library.Converter.Convert(r.Context(), id)
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, LibraryConvertResult{FileId: file})
+	case r.Context().Err() != nil:
+	case errors.Is(err, library.ErrFileNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "file not found")
+	case errors.Is(err, convert.ErrUnavailable):
+		writeError(w, http.StatusNotFound, "file_unavailable", "file cannot be opened")
+	case errors.Is(err, convert.ErrNotConvertible):
+		writeError(w, http.StatusConflict, "not_convertible", "only FB2 files can be converted")
+	case errors.Is(err, meta.ErrTooLarge):
+		writeError(w, http.StatusRequestEntityTooLarge, "file_too_large", "file is too large to convert")
+	case errors.Is(err, convert.ErrTimeout):
+		writeError(w, http.StatusGatewayTimeout, "conversion_timeout", "conversion timed out")
+	case errors.Is(err, convert.ErrFailed):
+		writeError(w, http.StatusUnprocessableEntity, "conversion_failed", "conversion failed")
+	default:
+		s.internal(w, "convert library file", err)
+	}
+}
+
+// DeleteLibraryFile удаляет результат конвертации. Запрос ждёт идущую конвертацию.
+func (s *Server) DeleteLibraryFile(w http.ResponseWriter, r *http.Request, id LibraryFileID) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(convertResponseTimeout))
+	err := s.Library.Converter.Delete(r.Context(), id)
+	switch {
+	case err == nil:
+		w.WriteHeader(http.StatusNoContent)
+	case r.Context().Err() != nil:
+	case errors.Is(err, library.ErrFileNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "file not found")
+	case errors.Is(err, library.ErrNotConverted):
+		writeError(w, http.StatusConflict, "not_converted", "file is not a conversion result")
+	default:
+		s.internal(w, "delete library file", err)
+	}
+}
+
 func (s *Server) writeLibraryBook(w http.ResponseWriter, r *http.Request, status int, id int64) {
 	cur, _ := panelauth.FromContext(r.Context())
 	d, err := s.Library.Store.Book(r.Context(), id, cur.User.ID)
@@ -350,7 +402,7 @@ func libraryBook(b library.Book) LibraryBook {
 func libraryFile(f library.File) LibraryFile {
 	out := LibraryFile{
 		Id: f.ID, RootName: f.RootName, Path: f.Path, Format: f.Format, Size: f.Size,
-		Title: f.Title, Authors: f.Authors, Pinned: f.Pinned,
+		Title: f.Title, Authors: f.Authors, Pinned: f.Pinned, Converted: f.Converted, Convertible: f.Convertible,
 	}
 	if p := f.Progress; p != nil {
 		out.Progress = &LibraryFileProgress{

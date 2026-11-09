@@ -23,6 +23,7 @@ import (
 
 	"github.com/varrcan/koreader-sync-board/server/internal/buildinfo"
 	"github.com/varrcan/koreader-sync-board/server/internal/config"
+	"github.com/varrcan/koreader-sync-board/server/internal/library/convert"
 )
 
 const usage = `usage: ksb <command> [arguments]
@@ -57,6 +58,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
+	}
+	// До чтения конфигурации: окружение дочернего процесса намеренно пустое.
+	if args[0] == "convert-fb2" {
+		return convert.Child(args[1:], stderr)
 	}
 	cfg, err := config.Load(os.Getenv)
 	if err != nil {

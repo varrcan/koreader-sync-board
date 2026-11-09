@@ -1165,6 +1165,86 @@ paths:
           $ref: "#/components/responses/LibraryNotFound"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/library/files/{id}:
+    parameters:
+      - $ref: "#/components/parameters/LibraryFileID"
+    delete:
+      operationId: deleteLibraryFile
+      summary: Удалить сконвертированный файл
+      description: Только администратор и только файл, созданный конвертацией. Прогресс по нему сохраняется.
+      tags: [library]
+      responses:
+        "204":
+          description: Файл удалён из индекса и с диска
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "`forbidden` (не администратор) или `cross_origin`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          $ref: "#/components/responses/LibraryNotFound"
+        "409":
+          description: "`not_converted` — файл из обычного корня."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/library/files/{id}/convert:
+    parameters:
+      - $ref: "#/components/parameters/LibraryFileID"
+    post:
+      operationId: convertLibraryFile
+      summary: Сконвертировать FB2 в EPUB
+      description: |
+        Создаёт EPUB в той же книге, доступно любому пользователю. Если для этого содержимого
+        результат уже есть, возвращает его. Отключение клиента конвертацию не прерывает.
+      tags: [library]
+      responses:
+        "200":
+          description: Готовый файл
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryConvertResult"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: "`not_found` — файла нет в индексе; `file_unavailable` — файл не открывается."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "`not_convertible` — формат не FB2."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: "`file_too_large` — больше 128 МиБ после распаковки."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: "`conversion_failed` — конвертер не справился с файлом."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "504":
+          description: "`conversion_timeout` — не уложились в 5 минут вместе с очередью."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/library/files/{id}/content:
     parameters:
       - $ref: "#/components/parameters/LibraryFileID"
@@ -1528,7 +1608,7 @@ components:
           format: date-time
     LibraryFile:
       type: object
-      required: [id, root_name, path, format, size, title, authors, pinned, progress]
+      required: [id, root_name, path, format, size, title, authors, pinned, converted, convertible, progress]
       properties:
         id:
           type: integer
@@ -1553,10 +1633,23 @@ components:
         pinned:
           type: boolean
           description: Книгу файла задал человек, скан не переносит его по ключу.
+        converted:
+          type: boolean
+          description: Файл создан конвертацией.
+        convertible:
+          type: boolean
+          description: Формат FB2, и результата конвертации этого содержимого нет.
         progress:
           allOf:
             - $ref: "#/components/schemas/LibraryFileProgress"
           nullable: true
+    LibraryConvertResult:
+      type: object
+      required: [file_id]
+      properties:
+        file_id:
+          type: integer
+          format: int64
     LibraryBookDetail:
       type: object
       required: [book, files, description, metadata]

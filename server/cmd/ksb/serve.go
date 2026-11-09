@@ -18,6 +18,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/config"
 	"github.com/varrcan/koreader-sync-board/server/internal/kosync"
 	"github.com/varrcan/koreader-sync-board/server/internal/library"
+	"github.com/varrcan/koreader-sync-board/server/internal/library/convert"
 	"github.com/varrcan/koreader-sync-board/server/internal/library/lookup"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
@@ -79,6 +80,17 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	lib := library.NewStore(db)
 	covers := library.NewCovers(filepath.Join(cfg.DataDir, "covers"))
 	scanner := library.NewScanner(lib, cfg.LibraryScanInterval, log, library.WithCovers(covers))
+	convertCtx, stopConvert := context.WithCancel(ctx)
+	defer stopConvert()
+	converter, err := convert.New(convertCtx, lib, cfg.DataDir, log)
+	if err != nil {
+		return fmt.Errorf("converter: %w", err)
+	}
+	// Выполняется до db.Close: задача записывает результат в базу.
+	defer func() {
+		stopConvert()
+		converter.Wait(scannerStopTimeout)
+	}()
 	handler := server.New(server.Handlers{
 		Kosync: kosync.New(acc, prog, kosync.Options{
 			Registration: cfg.KosyncRegistration,
@@ -94,6 +106,7 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 			Library: apiv1.Library{
 				Store: lib, Scanner: scanner, Covers: covers, Files: library.NewFileReader(),
 				Lookup: lookup.New(db, cfg.GoogleBooksAPIKey, log), CoverSource: lookup.NewCoverFetcher(),
+				Converter: converter,
 			},
 			Log: log,
 			SSO: provider,

@@ -440,9 +440,20 @@ type LibraryBookPage struct {
 	NextCursor *string `json:"next_cursor"`
 }
 
+// LibraryConvertResult defines model for LibraryConvertResult.
+type LibraryConvertResult struct {
+	FileId int64 `json:"file_id"`
+}
+
 // LibraryFile defines model for LibraryFile.
 type LibraryFile struct {
 	Authors *string `json:"authors"`
+
+	// Converted Файл создан конвертацией.
+	Converted bool `json:"converted"`
+
+	// Convertible Формат FB2, и результата конвертации этого содержимого нет.
+	Convertible bool `json:"convertible"`
 
 	// Format Example: epub
 	Format string `json:"format"`
@@ -1064,9 +1075,15 @@ type ServerInterface interface {
 	// GetLibraryCover Миниатюра обложки
 	// (GET /api/v1/library/covers/{cover})
 	GetLibraryCover(w http.ResponseWriter, r *http.Request, cover string)
+	// DeleteLibraryFile Удалить сконвертированный файл
+	// (DELETE /api/v1/library/files/{id})
+	DeleteLibraryFile(w http.ResponseWriter, r *http.Request, id LibraryFileID)
 	// GetLibraryFileContent Скачать файл
 	// (GET /api/v1/library/files/{id}/content)
 	GetLibraryFileContent(w http.ResponseWriter, r *http.Request, id LibraryFileID)
+	// ConvertLibraryFile Сконвертировать FB2 в EPUB
+	// (POST /api/v1/library/files/{id}/convert)
+	ConvertLibraryFile(w http.ResponseWriter, r *http.Request, id LibraryFileID)
 	// SplitLibraryFile Отделить файл в новую книгу
 	// (POST /api/v1/library/files/{id}/split)
 	SplitLibraryFile(w http.ResponseWriter, r *http.Request, id LibraryFileID)
@@ -1843,6 +1860,32 @@ func (siw *ServerInterfaceWrapper) GetLibraryCover(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteLibraryFile operation middleware
+func (siw *ServerInterfaceWrapper) DeleteLibraryFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id LibraryFileID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteLibraryFile(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetLibraryFileContent operation middleware
 func (siw *ServerInterfaceWrapper) GetLibraryFileContent(w http.ResponseWriter, r *http.Request) {
 
@@ -1860,6 +1903,32 @@ func (siw *ServerInterfaceWrapper) GetLibraryFileContent(w http.ResponseWriter, 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetLibraryFileContent(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConvertLibraryFile operation middleware
+func (siw *ServerInterfaceWrapper) ConvertLibraryFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id LibraryFileID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConvertLibraryFile(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2401,6 +2470,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/library/books/{id}/metadata", wrapper.DeleteLibraryBookMetadata)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/library/books/{id}/metadata", wrapper.PutLibraryBookMetadata)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/covers/{cover}", wrapper.GetLibraryCover)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/library/files/{id}", wrapper.DeleteLibraryFile)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/files/{id}/convert", wrapper.ConvertLibraryFile)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/files/{id}/content", wrapper.GetLibraryFileContent)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/files/{id}/split", wrapper.SplitLibraryFile)
 

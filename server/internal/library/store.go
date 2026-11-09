@@ -79,9 +79,19 @@ func scanRoot(row interface{ Scan(...any) error }) (Root, error) {
 	return r, nil
 }
 
-// Roots возвращает корни в порядке добавления.
+// Roots возвращает корни в порядке добавления, без служебного: файлы в нём появляются
+// только через конвертацию, показывать и сканировать там нечего.
 func (s *Store) Roots(ctx context.Context) ([]Root, error) {
-	rows, err := s.db.Read.QueryContext(ctx, `SELECT `+rootColumns+` FROM library_roots r ORDER BY r.id`)
+	return s.queryRoots(ctx, `WHERE r.managed = 0`)
+}
+
+// allRoots — корни вместе со служебным.
+func (s *Store) allRoots(ctx context.Context) ([]Root, error) {
+	return s.queryRoots(ctx, ``)
+}
+
+func (s *Store) queryRoots(ctx context.Context, where string) ([]Root, error) {
+	rows, err := s.db.Read.QueryContext(ctx, `SELECT `+rootColumns+` FROM library_roots r `+where+` ORDER BY r.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +125,9 @@ func (s *Store) AddRoot(ctx context.Context, path, name string) (Root, error) {
 	if err := checkDir(path); err != nil {
 		return Root{}, err
 	}
-	roots, err := s.Roots(ctx)
+	// Со служебным корнем: иначе каталог данных можно добавить как обычный корень, и
+	// сконвертированные файлы проиндексируются дважды.
+	roots, err := s.allRoots(ctx)
 	if err != nil {
 		return Root{}, err
 	}
@@ -210,7 +222,7 @@ func (s *Store) DeleteRoot(ctx context.Context, id int64) error {
 	if err != nil {
 		return err
 	}
-	res, err := tx.ExecContext(ctx, `DELETE FROM library_roots WHERE id = ?`, id)
+	res, err := tx.ExecContext(ctx, `DELETE FROM library_roots WHERE id = ? AND managed = 0`, id)
 	if err != nil {
 		return err
 	}
@@ -232,7 +244,7 @@ func (s *Store) counts(ctx context.Context) (books, files, roots int, finished *
 	var last sql.NullInt64
 	err = s.db.Read.QueryRowContext(ctx, `SELECT
 		(SELECT count(*) FROM library_books), (SELECT count(*) FROM library_files),
-		(SELECT count(*) FROM library_roots), (SELECT max(scanned_at) FROM library_roots)`).
+		(SELECT count(*) FROM library_roots WHERE managed = 0), (SELECT max(scanned_at) FROM library_roots)`).
 		Scan(&books, &files, &roots, &last)
 	if last.Valid {
 		t := time.Unix(last.Int64, 0).UTC()
@@ -337,17 +349,24 @@ func (s *Store) apply(ctx context.Context, rootID int64, cs []change) error {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM library_file_hashes WHERE file_id = ?`, id); err != nil {
 			return err
 		}
-		for _, h := range c.hashes {
-			if _, err := tx.ExecContext(ctx,
-				`INSERT OR IGNORE INTO library_file_hashes (hash, file_id) VALUES (?, ?)`, h, id); err != nil {
-				return err
-			}
+		if err := addHashes(ctx, tx, id, c.hashes); err != nil {
+			return err
 		}
 	}
 	if err := refreshBooks(ctx, tx, affected); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func addHashes(ctx context.Context, tx *sql.Tx, fileID int64, hashes []string) error {
+	for _, h := range hashes {
+		if _, err := tx.ExecContext(ctx,
+			`INSERT OR IGNORE INTO library_file_hashes (hash, file_id) VALUES (?, ?)`, h, fileID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // bookFor находит книгу по ключу группировки или создаёт новую. Файл без

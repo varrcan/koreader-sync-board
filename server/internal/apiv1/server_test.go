@@ -52,6 +52,8 @@ type env struct {
 	stats *statistics.Store
 	logs  *lockedBuffer
 	srv   *Server
+	// dataDir — каталог данных конвертера.
+	dataDir string
 }
 
 func newEnv(t *testing.T, statsOpts ...statistics.Option) *env {
@@ -80,7 +82,9 @@ func newEnv(t *testing.T, statsOpts ...statistics.Option) *env {
 		Library: Library{Store: lib, Scanner: scanner, Covers: covers, Files: library.NewFileReader()}}
 	srv := httptest.NewServer(NewHandler(api))
 	t.Cleanup(srv.Close)
-	return &env{t: t, ctx: ctx, url: srv.URL, db: db, acc: acc, setup: setup, stats: stats, logs: logs, srv: api}
+	e := &env{t: t, ctx: ctx, url: srv.URL, db: db, acc: acc, setup: setup, stats: stats, logs: logs, srv: api, dataDir: t.TempDir()}
+	e.useConverter(fakeConverter(t))
+	return e
 }
 
 // browser — клиент со своим cookie jar.

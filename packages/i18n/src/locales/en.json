@@ -314,6 +314,13 @@
       "yourProgress": "{{percent}} read",
       "download": "Download",
       "split": "Move to a separate book",
+      "convert": "To EPUB",
+      "converting": "Converting…",
+      "converted": "Converted",
+      "delete": "Delete",
+      "deleteTitle": "Delete “{{name}}”?",
+      "deleteDescription": "The file will disappear from the library and the disk. Reading progress stays, and the FB2 can be converted again.",
+      "deleteConfirm": "Delete",
       "merge": "Merge with…",
       "mergeTitle": "Merge with “{{title}}”",
       "mergeDescription": "Find the book to merge into this one. Its files move here and it disappears from the catalog.",
@@ -382,6 +389,11 @@
     "root_exists": "This folder is already added.",
     "root_overlap": "The folder is inside an added folder or contains one.",
     "single_file": "This is the only file of the book: there is nothing to split off.",
+    "not_convertible": "Only an FB2 file can be converted.",
+    "conversion_too_large": "The file is too large to convert: over 128 MiB unpacked.",
+    "conversion_failed": "Could not convert the file: it may be damaged.",
+    "conversion_timeout": "The conversion did not finish in time. Press again: the result may already be saved.",
+    "not_converted": "Only a converted file can be deleted.",
     "file_unavailable": "The file is unavailable: its folder is offline or the file was removed.",
     "library_not_found": "This is no longer in the library. Refresh the page.",
     "invalid_metadata": "Check the values: one of the fields is too long or invalid.",
@@ -561,6 +573,11 @@
         "title": "Statistics arrived, but books in the panel have no titles",
         "cause": "The reader uses <matchingFilename/> in <matchingMethod/>: statistics identifies books by the file contents, while progress then comes by file name, and the books do not match.",
         "fix": "Turn on <sendMetadata/> — titles will come with the progress — or choose <matchingBinary/>. Or put these book files into the server <library>library</library>: the file name hash finds them there. <a>Document matching</a>."
+      },
+      "conversionFailed": {
+        "title": "The “To EPUB” button reports an error",
+        "cause": "The FB2 file is damaged, too large (over 128 MiB unpacked), or the conversion did not finish within 5 minutes. Behind a reverse proxy the error also appears when the proxy stops waiting while the work goes on.",
+        "fix": "If the file is damaged, replace it in the library. If time ran out or the connection dropped, press “To EPUB” again: the result may already be saved."
       }
     }
   },

@@ -99,6 +99,37 @@ func fb2Archive(z *zip.Reader) (Book, error) {
 	return FB2(r)
 }
 
+// ReadFB2 возвращает содержимое файла формата fb2 или fb2.zip целиком: для архива это
+// та же запись, из которой взяты метаданные и обложка. Больше предела — ErrTooLarge.
+func ReadFB2(r io.ReaderAt, size int64, format string) ([]byte, error) {
+	switch format {
+	case "fb2":
+		if size > maxCoverRead {
+			return nil, ErrTooLarge
+		}
+		return readAll(io.NewSectionReader(r, 0, size), maxCoverRead)
+	case "fb2.zip":
+		z, err := zip.NewReader(r, size)
+		if err != nil {
+			return nil, err
+		}
+		f, err := fb2Entry(z)
+		if err != nil {
+			return nil, err
+		}
+		if f.UncompressedSize64 > maxCoverRead {
+			return nil, fmt.Errorf("%s: %w", f.Name, ErrTooLarge)
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, err
+		}
+		defer rc.Close()
+		return readAll(rc, maxCoverRead)
+	}
+	return nil, fmt.Errorf("format %q is not FB2", format)
+}
+
 // fb2Entry — первая запись *.fb2 архива.
 func fb2Entry(z *zip.Reader) (*zip.File, error) {
 	for _, f := range z.File {

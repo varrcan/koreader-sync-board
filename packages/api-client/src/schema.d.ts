@@ -780,6 +780,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/files/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryFileID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Удалить сконвертированный файл
+         * @description Только администратор и только файл, созданный конвертацией. Прогресс по нему сохраняется.
+         */
+        delete: operations["deleteLibraryFile"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/library/files/{id}/convert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryFileID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Сконвертировать FB2 в EPUB
+         * @description Создаёт EPUB в той же книге, доступно любому пользователю. Если для этого содержимого
+         *     результат уже есть, возвращает его. Отключение клиента конвертацию не прерывает.
+         */
+        post: operations["convertLibraryFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/files/{id}/content": {
         parameters: {
             query?: never;
@@ -933,7 +978,15 @@ export interface components {
             authors: string | null;
             /** @description Книгу файла задал человек, скан не переносит его по ключу. */
             pinned: boolean;
+            /** @description Файл создан конвертацией. */
+            converted: boolean;
+            /** @description Формат FB2, и результата конвертации этого содержимого нет. */
+            convertible: boolean;
             progress: components["schemas"]["LibraryFileProgress"] | null;
+        };
+        LibraryConvertResult: {
+            /** Format: int64 */
+            file_id: number;
         };
         LibraryBookDetail: {
             book: components["schemas"]["LibraryBook"];
@@ -2825,6 +2878,116 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             404: components["responses"]["LibraryNotFound"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteLibraryFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryFileID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Файл удалён из индекса и с диска */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` (не администратор) или `cross_origin` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            404: components["responses"]["LibraryNotFound"];
+            /** @description `not_converted` — файл из обычного корня. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    convertLibraryFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["LibraryFileID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Готовый файл */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryConvertResult"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `not_found` — файла нет в индексе; `file_unavailable` — файл не открывается. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `not_convertible` — формат не FB2. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `file_too_large` — больше 128 МиБ после распаковки. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `conversion_failed` — конвертер не справился с файлом. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `conversion_timeout` — не уложились в 5 минут вместе с очередью. */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             default: components["responses"]["Error"];
         };
     };

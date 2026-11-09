@@ -232,7 +232,7 @@ func TestBookDetail(t *testing.T) {
 	}
 
 	loc, err := e.st.FileLocation(e.ctx, d.Files[1].ID)
-	if err != nil || loc != (FileLocation{Root: root.Path, Path: "sub/Piknik.epub", Format: "epub"}) {
+	if err != nil || loc != (FileLocation{Root: root.Path, Path: "sub/Piknik.epub", Format: "epub", PartialMD5: partial}) {
 		t.Fatalf("location %+v %v", loc, err)
 	}
 	if _, err := e.st.FileLocation(e.ctx, 9999); !errors.Is(err, ErrFileNotFound) {

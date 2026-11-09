@@ -70,6 +70,7 @@ export function HelpTroubleshootingPage() {
           a: <Link to="/help/progress" hash="matching" className={helpLink} />,
         }}
       />
+      <ProblemItem id="conversion-failed" problem="conversionFailed" />
     </HelpPage>
   );
 }

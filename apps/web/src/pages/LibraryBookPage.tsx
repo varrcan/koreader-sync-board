@@ -1,7 +1,7 @@
 import type { LibraryBook, LibraryFile } from "@ksb/api-client";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, BookText, Download, Merge, Pin, Split } from "lucide-react";
+import { ArrowLeft, BookText, Download, FileOutput, Merge, Pin, Split, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiFailure } from "@/api";
@@ -9,6 +9,16 @@ import { meQuery } from "@/auth";
 import { BookCover } from "@/components/BookCover";
 import { FormError } from "@/components/FormError";
 import { MetadataDialog } from "@/components/MetadataDialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,6 +39,8 @@ import {
   libraryBookQuery,
   libraryBooksQuery,
   libraryErrorText,
+  useConvertFile,
+  useDeleteConverted,
   useMergeBooks,
   useSplitFile,
 } from "@/library";
@@ -144,11 +156,19 @@ function FileRow({
   canSplit,
   splitting,
   onSplit,
+  converting,
+  onConvert,
+  canDelete,
+  onDelete,
 }: {
   file: LibraryFile;
   canSplit: boolean;
   splitting: boolean;
   onSplit: () => void;
+  converting: boolean;
+  onConvert: () => void;
+  canDelete: boolean;
+  onDelete: () => void;
 }) {
   const { t, i18n } = useTranslation();
   const lang = i18n.language;
@@ -186,17 +206,37 @@ function FileRow({
         )}
       </div>
       <p className="font-mono text-xs break-all text-muted-foreground">
-        {file.root_name} / {file.path}
+        {file.converted ? (
+          <>
+            <span className="font-sans">{t("library.detail.converted")}</span> · {file.path.split("/").pop()}
+          </>
+        ) : (
+          <>
+            {file.root_name} / {file.path}
+          </>
+        )}
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="outline" size="sm" disabled={checking} onClick={() => void download()}>
           <Download />
           {t("library.detail.download")}
         </Button>
+        {file.convertible && (
+          <Button variant="outline" size="sm" disabled={converting} onClick={onConvert}>
+            <FileOutput />
+            {t(converting ? "library.detail.converting" : "library.detail.convert")}
+          </Button>
+        )}
         {canSplit && (
           <Button variant="ghost" size="sm" disabled={splitting} onClick={onSplit}>
             <Split />
             {t("library.detail.split")}
+          </Button>
+        )}
+        {canDelete && (
+          <Button variant="ghost" size="sm" onClick={onDelete}>
+            <Trash2 />
+            {t("library.detail.delete")}
           </Button>
         )}
         {unavailable && <span className="text-sm text-destructive">{t("errors.file_unavailable")}</span>}
@@ -205,11 +245,41 @@ function FileRow({
   );
 }
 
+function DeleteConvertedDialog({ file, onClose }: { file: LibraryFile; onClose: () => void }) {
+  const { t } = useTranslation();
+  const remove = useDeleteConverted();
+  return (
+    <AlertDialog open onOpenChange={(open) => !open && onClose()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("library.detail.deleteTitle", { name: file.path.split("/").pop() })}</AlertDialogTitle>
+          <AlertDialogDescription>{t("library.detail.deleteDescription")}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <FormError message={remove.isError ? libraryErrorText(t, remove.error) : undefined} />
+        <AlertDialogFooter>
+          <AlertDialogCancel>{t("library.cancel")}</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={remove.isPending}
+            onClick={(e) => {
+              e.preventDefault();
+              remove.mutate(file.id, { onSuccess: onClose });
+            }}
+          >
+            {t("library.detail.deleteConfirm")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 function BookView({ id }: { id: number }) {
   const { t } = useTranslation();
   const { data: me } = useQuery(meQuery);
   const detail = useQuery(libraryBookQuery(id));
   const split = useSplitFile();
+  const convert = useConvertFile();
+  const [deleting, setDeleting] = useState<LibraryFile | null>(null);
   const navigate = useNavigate();
   const [merging, setMerging] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -275,6 +345,7 @@ function BookView({ id }: { id: number }) {
       <section className="flex max-w-5xl flex-col gap-1 rounded-xl border bg-card p-5">
         <h2 className="text-[15px] leading-5 font-semibold">{t("library.detail.files")}</h2>
         <FormError message={split.isError ? libraryErrorText(t, split.error) : undefined} />
+        <FormError message={convert.isError ? libraryErrorText(t, convert.error) : undefined} />
         <ul className="flex flex-col">
           {files.map((f) => (
             <FileRow
@@ -288,11 +359,16 @@ function BookView({ id }: { id: number }) {
                     void navigate({ to: "/library/books/$id", params: { id: String(created.book.id) } }),
                 })
               }
+              converting={convert.isPending && convert.variables === f.id}
+              onConvert={() => convert.mutate(f.id)}
+              canDelete={isAdmin && f.converted}
+              onDelete={() => setDeleting(f)}
             />
           ))}
         </ul>
       </section>
       {merging && <MergeDialog book={book} onClose={() => setMerging(false)} />}
+      {deleting && <DeleteConvertedDialog file={deleting} onClose={() => setDeleting(null)} />}
       {editing && <MetadataDialog detail={detail.data} onClose={() => setEditing(false)} />}
     </>
   );

@@ -181,6 +181,33 @@ export function useSplitFile() {
   });
 }
 
+export function useConvertFile() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number): Promise<number> => {
+      const { data, error, response } = await api.POST("/api/v1/library/files/{id}/convert", {
+        params: { path: { id } },
+      });
+      if (error) throw failure(error, response);
+      return data.file_id;
+    },
+    onSuccess: () => invalidateCatalog(client),
+  });
+}
+
+export function useDeleteConverted() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: number): Promise<void> => {
+      const { error, response } = await api.DELETE("/api/v1/library/files/{id}", {
+        params: { path: { id } },
+      });
+      if (error) throw failure(error, response);
+    },
+    onSuccess: () => invalidateCatalog(client),
+  });
+}
+
 export type CandidateSearch = { q?: string; isbn?: string };
 
 /**
@@ -274,5 +301,8 @@ export function externalSource(source: string | null | undefined): string | unde
 
 /** errorText, где not_found — про библиотеку: общий текст говорит об устройстве. */
 export function libraryErrorText(t: TFunction, err: unknown): string {
-  return err instanceof ApiFailure && err.code === "not_found" ? t("errors.library_not_found") : errorText(t, err);
+  if (err instanceof ApiFailure && err.code === "not_found") return t("errors.library_not_found");
+  // Тот же код у импорта статистики, но предел другой.
+  if (err instanceof ApiFailure && err.code === "file_too_large") return t("errors.conversion_too_large");
+  return errorText(t, err);
 }

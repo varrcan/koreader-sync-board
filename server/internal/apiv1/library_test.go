@@ -7,6 +7,7 @@ import (
 	"image"
 	"image/jpeg"
 	"io"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
 	"github.com/varrcan/koreader-sync-board/server/internal/hashing"
+	"github.com/varrcan/koreader-sync-board/server/internal/library"
 )
 
 // waitScan ждёт, пока сводка библиотеки покажет законченный скан.
@@ -57,7 +59,7 @@ func TestLibraryAccess(t *testing.T) {
 		{"DELETE", "/api/v1/library/roots/1"}, {"POST", "/api/v1/library/scan"}} {
 		user.do(c[0], c[1], map[string]string{"path": t.TempDir()}).expect(t, "user "+c[1], 403, "forbidden")
 	}
-	if n := e.count(`SELECT count(*) FROM library_roots`); n != 0 {
+	if n := e.count(`SELECT count(*) FROM library_roots WHERE managed = 0`); n != 0 {
 		t.Fatalf("user created %d roots", n)
 	}
 }
@@ -372,6 +374,43 @@ func (b *browser) raw(method, path string, header map[string]string) rawResp {
 		b.e.t.Fatal(err)
 	}
 	return rawResp{status: res.StatusCode, header: res.Header, body: string(data)}
+}
+
+func TestLibraryDownloadConverted(t *testing.T) {
+	e := newEnv(t)
+	admin := e.panelUser("root", accounts.RoleAdmin)
+	libraryFixture(t, admin, map[string]string{"Пикник.fb2": "fb2"})
+	book := libraryIDs(t, admin)["Пикник.fb2"]
+	source := fileIDs(t, admin, book)[0]
+
+	st := library.NewStore(e.db)
+	managed := filepath.Join(t.TempDir(), "converted")
+	if err := st.EnsureManagedRoot(e.ctx, managed); err != nil {
+		t.Fatal(err)
+	}
+	const name = "Пикник.epub"
+	content := strings.Repeat("epub bytes", 500)
+	file := filepath.Join(managed, "abc", name)
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(file, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.AddConverted(e.ctx, library.Converted{SourceID: source, SourceMD5: "abc", Path: "abc/" + name,
+		Size: int64(len(content)), MTime: 1, PartialMD5: "abc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r := admin.raw("GET", fmt.Sprintf("/api/v1/library/files/%d/content", id), nil)
+	if r.status != 200 || r.body != content || r.header.Get("Content-Type") != "application/epub+zip" {
+		t.Fatalf("download: %d %v, %d bytes", r.status, r.header, len(r.body))
+	}
+	_, params, err := mime.ParseMediaType(r.header.Get("Content-Disposition"))
+	if err != nil || params["filename"] != name {
+		t.Fatalf("disposition %q: %v", r.header.Get("Content-Disposition"), err)
+	}
 }
 
 func TestLibraryDownload(t *testing.T) {

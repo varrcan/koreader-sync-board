@@ -255,6 +255,12 @@ the files and directories.
   inside the data directory; nothing is written to the book folders. Other formats and books
   without a cover get a generated one. With `KSB_LIBRARY_SCAN_INTERVAL=0`, books indexed before
   covers appeared get them on the next manual scan.
+- **FB2 to EPUB**: the **To EPUB** button on a book page converts an FB2 or FB2.ZIP file. The
+  EPUB joins the same book and is stored in `converted/` inside the data directory, never in
+  the book folders. It works like any other library file (hashes, progress, download) and its
+  bytes never change on their own, even if the FB2 or the converter does, because new bytes
+  would mean a new document hash. An admin can delete the result and convert again; reading
+  progress stays. One conversion runs at a time, in a separate process, for up to 5 minutes.
 - **Unavailable storage**: if a folder cannot be read or is suddenly empty (an unmounted NAS),
   its index is kept and the panel shows the error. To clear the index of a folder emptied on
   purpose, delete the folder in the panel.
@@ -289,7 +295,7 @@ edits of the book.
 | Variable | Default | Meaning |
 |---|---|---|
 | `KSB_LISTEN` | `:8080` | Listen address |
-| `KSB_DATA_DIR` | `/data` | Data directory (SQLite database `ksb.sqlite3`, cover thumbnails in `covers/`) |
+| `KSB_DATA_DIR` | `/data` | Data directory (SQLite database `ksb.sqlite3`, cover thumbnails in `covers/`, converted books in `converted/`, conversion work files in `tmp/`) |
 | `KSB_KOSYNC_REGISTRATION` | `false` | Allow creating accounts from KOReader (`POST /users/create`) |
 | `KSB_KOSYNC_SELF_DELETE` | `false` | Allow deleting an account from the device (`DELETE /users/me`) |
 | `KSB_TRUSTED_PROXIES` | — | Reverse proxies whose `X-Forwarded-For` is trusted: CIDRs or single addresses, comma-separated (see below) |
@@ -448,3 +454,7 @@ error order and codes, document hashes, and quirks of KOReader and CrossPoint cl
 ## License
 
 [AGPL-3.0](LICENSE)
+
+FB2 conversion uses [fb2cng](https://github.com/rupor-github/fb2cng) (GPL-3.0), linked through the
+fork [varrcan/fb2cng](https://github.com/varrcan/fb2cng), which only adds the files upstream
+generates at build time.

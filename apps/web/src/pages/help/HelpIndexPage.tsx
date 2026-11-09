@@ -1,10 +1,11 @@
 import { Link } from "@tanstack/react-router";
-import { ChartNoAxesColumn, ChevronRight, LifeBuoy, RefreshCw } from "lucide-react";
+import { BookDown, ChartNoAxesColumn, ChevronRight, LifeBuoy, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 const pages = [
   { to: "/help/progress", key: "progress", icon: <RefreshCw /> },
   { to: "/help/statistics", key: "statistics", icon: <ChartNoAxesColumn /> },
+  { to: "/help/opds", key: "opds", icon: <BookDown /> },
   { to: "/help/troubleshooting", key: "troubleshooting", icon: <LifeBuoy /> },
 ] as const;
 

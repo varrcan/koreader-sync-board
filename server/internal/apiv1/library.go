@@ -5,7 +5,6 @@ import (
 	"errors"
 	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
 	"time"
 	"unicode/utf8"
@@ -318,8 +317,7 @@ func (s *Server) GetLibraryCover(w http.ResponseWriter, r *http.Request, cover s
 	http.ServeContent(w, r, "", time.Time{}, f)
 }
 
-// GetLibraryFileContent отдаёт файл с диска. os.OpenInRoot не выпускает за корень
-// ни через «..», ни через симлинк, подменённый после скана.
+// GetLibraryFileContent отдаёт файл с диска.
 func (s *Server) GetLibraryFileContent(w http.ResponseWriter, r *http.Request, id LibraryFileID) {
 	loc, err := s.Library.Store.FileLocation(r.Context(), id)
 	switch {
@@ -330,29 +328,16 @@ func (s *Server) GetLibraryFileContent(w http.ResponseWriter, r *http.Request, i
 		s.internal(w, "library file location", err)
 		return
 	}
-	unavailable := func(err error) {
+	f, fi, err := library.OpenFile(loc)
+	if err != nil {
 		s.Log.Warn("panel: library file unavailable", "root", loc.Root, "path", loc.Path, "err", err)
 		writeError(w, http.StatusNotFound, "file_unavailable", "file is unavailable")
-	}
-	rel := filepath.FromSlash(loc.Path)
-	f, err := os.OpenInRoot(loc.Root, rel)
-	if err != nil {
-		unavailable(err)
 		return
 	}
 	defer f.Close()
-	fi, err := f.Stat()
-	if err != nil {
-		unavailable(err)
-		return
-	}
-	if !fi.Mode().IsRegular() {
-		unavailable(errors.New("not a regular file"))
-		return
-	}
 	// ResponseRecorder сроков не поддерживает, ошибка не важна.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(downloadTimeout))
-	name := filepath.Base(rel)
+	name := filepath.Base(filepath.FromSlash(loc.Path))
 	h := w.Header()
 	h.Set("Content-Type", contentType(loc.Format))
 	h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))

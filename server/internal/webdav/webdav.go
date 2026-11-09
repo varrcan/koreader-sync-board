@@ -16,15 +16,13 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"math"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
-	"github.com/varrcan/koreader-sync-board/server/internal/authlog"
 	"github.com/varrcan/koreader-sync-board/server/internal/clientip"
+	"github.com/varrcan/koreader-sync-board/server/internal/deviceauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
 )
 
@@ -42,10 +40,9 @@ const maxPropfindBody = 64 << 10
 
 // Handler обслуживает префикс /dav/.
 type Handler struct {
-	accounts *accounts.Service
-	stats    *statistics.Store
-	ip       *clientip.Resolver
-	log      *slog.Logger
+	auth  *deviceauth.Basic
+	stats *statistics.Store
+	log   *slog.Logger
 
 	// beforeWrite вызывается между проверкой входа и записью PUT (для тестов).
 	beforeWrite func()
@@ -53,11 +50,11 @@ type Handler struct {
 
 // New создаёт обработчик. ip определяет адрес клиента для ограничителя и лога.
 func New(acc *accounts.Service, stats *statistics.Store, ip *clientip.Resolver, log *slog.Logger) *Handler {
-	return &Handler{accounts: acc, stats: stats, ip: ip, log: log}
+	return &Handler{auth: deviceauth.New(acc, ip, log, "webdav", true), stats: stats, log: log}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p, ok := h.authenticate(w, r)
+	p, ok := h.auth.Authenticate(w, r)
 	if !ok {
 		return
 	}
@@ -104,44 +101,6 @@ func resource(path string) (name string, root, ok bool) {
 func methodNotAllowed(w http.ResponseWriter) {
 	w.Header().Set("Allow", allow)
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-}
-
-// authenticate проверяет Basic с паролем устройства. Пароль превращается в ключ
-// kosync (md5), поэтому проверка, кеш и ограничитель — те же, что у kosync.
-func (h *Handler) authenticate(w http.ResponseWriter, r *http.Request) (accounts.Principal, bool) {
-	client := h.ip.Addr(r)
-	user, pass, ok := r.BasicAuth()
-	if !ok {
-		authlog.Failure(h.log, "webdav", r, client, "", "missing basic credentials")
-		unauthorized(w)
-		return accounts.Principal{}, false
-	}
-	p, err := h.accounts.Authenticate(r.Context(), user, accounts.KeyFromPassword(pass), client)
-	var rl *accounts.RateLimitedError
-	switch {
-	case err == nil:
-		return p, true
-	case errors.As(err, &rl):
-		// Начало блокировки пишет ограничитель, отдельные отказы не логируются.
-		w.Header().Set("Retry-After", strconv.FormatInt(int64(math.Ceil(rl.RetryAfter.Seconds())), 10))
-		http.Error(w, "too many failed attempts", http.StatusTooManyRequests)
-	case errors.Is(err, accounts.ErrUnauthorized):
-		// Повтор недавно отвергнутого ключа — отозванная читалка; fail2ban по
-		// таким строкам забанил бы её домашнюю сеть.
-		if !errors.Is(err, accounts.ErrRepeated) {
-			authlog.Failure(h.log, "webdav", r, client, user, err.Error())
-		}
-		unauthorized(w)
-	default:
-		h.log.Error("webdav: authenticate", "err", err)
-		http.Error(w, "internal server error", http.StatusInternalServerError)
-	}
-	return accounts.Principal{}, false
-}
-
-func unauthorized(w http.ResponseWriter) {
-	w.Header().Set("WWW-Authenticate", `Basic realm="koreader-sync-board"`)
-	http.Error(w, "unauthorized", http.StatusUnauthorized)
 }
 
 // extendDeadlines продлевает сроки чтения и записи соединения для передачи файла.
@@ -213,8 +172,7 @@ func (h *Handler) put(w http.ResponseWriter, r *http.Request, p accounts.Princip
 	case errors.Is(err, statistics.ErrPrecondition):
 		http.Error(w, "precondition failed", http.StatusPreconditionFailed)
 	case errors.Is(err, accounts.ErrUnauthorized):
-		authlog.Failure(h.log, "webdav", r, h.ip.Addr(r), p.Username, "credential changed before write")
-		unauthorized(w)
+		h.auth.Reject(w, r, p.Username, "credential changed before write")
 	default:
 		h.internal(w, "put", err)
 	}

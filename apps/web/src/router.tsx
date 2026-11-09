@@ -10,6 +10,7 @@ import { BooksPage } from "./pages/BooksPage";
 import { AccountPage } from "./pages/AccountPage";
 import { DevicesPage } from "./pages/DevicesPage";
 import { HelpIndexPage } from "./pages/help/HelpIndexPage";
+import { HelpOpdsPage } from "./pages/help/HelpOpdsPage";
 import { HelpProgressPage } from "./pages/help/HelpProgressPage";
 import { HelpStatisticsPage } from "./pages/help/HelpStatisticsPage";
 import { HelpTroubleshootingPage } from "./pages/help/HelpTroubleshootingPage";
@@ -184,6 +185,12 @@ const helpStatisticsRoute = createRoute({
   component: HelpStatisticsPage,
 });
 
+const helpOpdsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/help/opds",
+  component: HelpOpdsPage,
+});
+
 const helpTroubleshootingRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/help/troubleshooting",
@@ -207,6 +214,7 @@ const routeTree = rootRoute.addChildren([
     helpRoute,
     helpProgressRoute,
     helpStatisticsRoute,
+    helpOpdsRoute,
     helpTroubleshootingRoute,
   ]),
 ]);

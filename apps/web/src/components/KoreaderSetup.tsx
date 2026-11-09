@@ -34,6 +34,14 @@ const koreaderMenu = {
   cloudStoragePlus: "Cloud storage+",
   vocabularyBuilder: "Vocabulary builder",
   logout: "Logout",
+  search: "Search",
+  opdsCatalog: "OPDS catalog",
+  addCatalog: "Add catalog",
+  catalogName: "Catalog name",
+  catalogUrl: "Catalog URL",
+  catalogUsername: "Username (optional)",
+  catalogPassword: "Password (optional)",
+  serverFilenames: "Use server filenames",
 } as const;
 
 export type MenuItem = keyof typeof koreaderMenu;
@@ -41,6 +49,11 @@ export type MenuItem = keyof typeof koreaderMenu;
 /** Адрес WebDAV для облачной синхронизации KOReader: тот же origin, что у панели. */
 export function webdavAddress(): string {
   return `${window.location.origin}/dav`;
+}
+
+/** Адрес каталога OPDS: тот же origin, что у панели. */
+export function opdsAddress(): string {
+  return `${window.location.origin}/opds`;
 }
 
 export function MenuLabel({ item }: { item: MenuItem }) {

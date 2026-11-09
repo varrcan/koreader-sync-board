@@ -6,8 +6,11 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"math"
+	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -102,6 +105,17 @@ const bookSelect = `SELECT lb.id, lb.title, lb.authors, lb.series, lb.series_ind
 // Ключ и курсор — id книги: его выдаёт единственный писатель, поэтому книга,
 // созданная во время листания, уходит выше курсора и повторно не приходит.
 func (s *Store) Books(ctx context.Context, q string, before int64, limit int) (BookPage, error) {
+	// Книги и их файлы — из одного снимка, иначе слияние между запросами оставит
+	// книгу без файлов.
+	tx, err := s.db.Read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return BookPage{}, err
+	}
+	defer tx.Rollback()
+	return queryBookPage(ctx, tx, q, before, limit)
+}
+
+func queryBookPage(ctx context.Context, tx *sql.Tx, q string, before int64, limit int) (BookPage, error) {
 	if before <= 0 {
 		before = math.MaxInt64
 	}
@@ -113,14 +127,6 @@ func (s *Store) Books(ctx context.Context, q string, before int64, limit int) (B
 	}
 	query += ` ORDER BY lb.id DESC LIMIT ?`
 	args = append(args, limit+1)
-
-	// Книги и их файлы — из одного снимка, иначе слияние между запросами оставит
-	// книгу без файлов.
-	tx, err := s.db.Read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return BookPage{}, err
-	}
-	defer tx.Rollback()
 	books, err := queryBooks(ctx, tx, query, args...)
 	if err != nil {
 		return BookPage{}, err
@@ -163,6 +169,86 @@ func (s *Store) Book(ctx context.Context, id, userID int64) (BookDetail, error) 
 		return BookDetail{}, err
 	}
 	return BookDetail{Book: books[0], Files: files, Description: description, Metadata: info}, nil
+}
+
+// FeedFile — файл книги в ленте каталога для читалок.
+type FeedFile struct {
+	ID           int64
+	Path, Format string
+	Size         int64
+}
+
+// FeedBook — книга ленты: файлы по возрастанию id, описание из правок и время
+// последнего изменения.
+type FeedBook struct {
+	Book        Book
+	Files       []FeedFile
+	Description *string
+	Updated     time.Time
+}
+
+// FeedPage — страница ленты. Next — курсор следующей страницы, 0 на последней.
+type FeedPage struct {
+	Items []FeedBook
+	Next  int64
+}
+
+// Feed — страница книг с теми же правилами отбора и порядком, что Books, но с
+// данными файлов, которые нужны записи каталога.
+func (s *Store) Feed(ctx context.Context, q string, before int64, limit int) (FeedPage, error) {
+	tx, err := s.db.Read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return FeedPage{}, err
+	}
+	defer tx.Rollback()
+	return feedPage(ctx, tx, q, before, limit)
+}
+
+func feedPage(ctx context.Context, tx *sql.Tx, q string, before int64, limit int) (FeedPage, error) {
+	page, err := queryBookPage(ctx, tx, q, before, limit)
+	if err != nil {
+		return FeedPage{}, err
+	}
+	out := FeedPage{Items: make([]FeedBook, len(page.Items)), Next: page.Next}
+	if len(page.Items) == 0 {
+		return out, nil
+	}
+	ids := make([]int64, len(page.Items))
+	index := make(map[int64]*FeedBook, len(page.Items))
+	for i, b := range page.Items {
+		ids[i] = b.ID
+		out.Items[i].Book = b
+		index[b.ID] = &out.Items[i]
+	}
+	list, err := json.Marshal(ids)
+	if err != nil {
+		return FeedPage{}, err
+	}
+	rows, err := tx.QueryContext(ctx, `
+		SELECT lb.id, m.description, coalesce(m.updated_at, lb.created_at), f.id, f.path, f.format, f.size
+		FROM library_files f
+		JOIN library_books lb ON lb.id = f.book_id
+		LEFT JOIN library_book_meta m ON m.book_id = lb.id
+		WHERE lb.id IN (SELECT value FROM json_each(?)) ORDER BY f.id`, string(list))
+	if err != nil {
+		return FeedPage{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id, updated int64
+			description sql.NullString
+			f           FeedFile
+		)
+		if err := rows.Scan(&id, &description, &updated, &f.ID, &f.Path, &f.Format, &f.Size); err != nil {
+			return FeedPage{}, err
+		}
+		b := index[id]
+		b.Description = nullable(description)
+		b.Updated = time.Unix(updated, 0).UTC()
+		b.Files = append(b.Files, f)
+	}
+	return out, rows.Err()
 }
 
 func queryBooks(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]Book, error) {
@@ -312,6 +398,24 @@ func (s *Store) FileLocation(ctx context.Context, id int64) (FileLocation, error
 		return FileLocation{}, ErrFileNotFound
 	}
 	return l, err
+}
+
+// OpenFile открывает файл библиотеки для отдачи. os.OpenInRoot не выпускает за
+// корень ни через «..», ни через симлинк, подменённый после скана.
+func OpenFile(l FileLocation) (*os.File, fs.FileInfo, error) {
+	f, err := os.OpenInRoot(l.Root, filepath.FromSlash(l.Path))
+	if err != nil {
+		return nil, nil, err
+	}
+	fi, err := f.Stat()
+	if err == nil && !fi.Mode().IsRegular() {
+		err = errors.New("not a regular file")
+	}
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	return f, fi, nil
 }
 
 // Merge вливает книгу from в into: ключи и файлы переходят, файлы закрепляются,

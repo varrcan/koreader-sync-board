@@ -44,7 +44,7 @@ func newTestServer(t *testing.T) http.Handler {
 		Accounts: acc, Auth: panelauth.New(acc, nil, log), Setup: panelauth.NewSetup(acc, nil),
 		Progress: progress.New(db), Statistics: statistics.New(db, t.TempDir(), log), Log: log,
 	})
-	return New(Handlers{Kosync: tag("kosync"), API: api, WebDAV: tag("webdav"), Web: web.Handler()})
+	return New(Handlers{Kosync: tag("kosync"), API: api, WebDAV: tag("webdav"), OPDS: tag("opds"), Web: web.Handler()})
 }
 
 func TestRouting(t *testing.T) {
@@ -76,6 +76,11 @@ func TestRouting(t *testing.T) {
 		{"GET", "/dav/statistics.sqlite3", 200, "webdav", ""},
 		{"PUT", "/dav/statistics.sqlite3", 200, "webdav", ""},
 		{"GET", "/davx", 200, "<html", "text/html; charset=utf-8"},
+		{"GET", "/opds", 200, "opds", ""},
+		{"GET", "/opds/", 200, "opds", ""},
+		{"GET", "/opds/books", 200, "opds", ""},
+		{"HEAD", "/opds/books", 200, "opds", ""},
+		{"GET", "/opdsx", 200, "<html", "text/html; charset=utf-8"},
 		{"POST", "/library", 405, "", ""},
 	}
 	for _, tt := range tests {

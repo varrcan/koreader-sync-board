@@ -1,7 +1,7 @@
 import type { LibraryBook } from "@ksb/api-client";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { FolderCog, Search } from "lucide-react";
+import { BookDown, FolderCog, Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { meQuery } from "@/auth";
@@ -79,14 +79,22 @@ export function LibraryPage() {
             </div>
           )}
         </div>
-        {isAdmin && (
-          <Button variant="outline" className="self-start" asChild>
-            <Link to="/library/roots">
-              <FolderCog />
-              {t("library.rootsLink")}
+        <div className="flex flex-wrap gap-2 self-start">
+          <Button variant="outline" asChild>
+            <Link to="/help/opds" hash="setup">
+              <BookDown />
+              {t("library.opdsLink")}
             </Link>
           </Button>
-        )}
+          {isAdmin && (
+            <Button variant="outline" asChild>
+              <Link to="/library/roots">
+                <FolderCog />
+                {t("library.rootsLink")}
+              </Link>
+            </Button>
+          )}
+        </div>
       </div>
 
       {!noRoots && (

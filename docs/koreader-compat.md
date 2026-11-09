@@ -245,6 +245,38 @@ first.
 - Where a hash has several `book` rows, KOReader shows only the row of the open `id_book`;
   the server counts all rows of the hash.
 
+## OPDS catalog
+
+`/opds` is OPDS 1.2 Atom. Client behaviour below is from `plugins/opds.koplugin`
+(`opdsbrowser.lua`, `opdsparser.lua`) and `frontend/luxl.lua`; `task opds:golden` runs a
+snapshot of the feed through the real parser under LuaJIT.
+
+- **Atom only, first byte `<`.** KOReader treats a body starting with `{` as OPDS 2; v2026.07.1
+  parses Atom only when the first byte is `<`, so no BOM or whitespace before `<?xml`.
+- **No extension in file URLs.** `getFiletype` takes the suffix of the whole `href` first and
+  falls back to `mimeToExt(link.type)` only when there is no provider for it. In
+  `/opds/files/7/x.fb2.zip` the suffix is `zip`, so the file would be saved as `.zip`. Types are
+  those registered first for the extension: `application/fb2+zip`, not the ambiguous
+  `application/zip`.
+- **`filename` in quotes.** `getServerFileName` only finds `filename="…"` and `filename=…`, not
+  `filename*`. A non-ASCII name is also sent percent-encoded in `filename="…"`; KOReader runs
+  it through `urlDecode`, RFC 6266 clients prefer `filename*`.
+- **`summary`, not `content`.** `OPDSParser:parse` rewrites `content` with regular expressions;
+  `summary` stays plain text.
+- **Search.** Every feed has a template link (`rel="search"`, Atom type, `{searchTerms}`): an
+  empty feed is only shown when it has a `search_url`. The root also has an OpenSearch
+  description, before the template, for other clients; KOReader v2026.07.1 then skips the template.
+  The description is only in the root, otherwise KOReader would fetch it on every page.
+- **No `ETag` or `Last-Modified` on feeds.** With neither, v2026.07.1 sends `HEAD`, then `GET`,
+  for each feed: cheap for feeds this small, and nothing to invalidate on edits and scans.
+- **EPUB on demand.** `GET /opds/files/{id}/epub` converts inside the request; KOReader's download
+  timeout is 15 s, and a dropped connection does not cancel the job, so a retry gets the result.
+  `HEAD` never converts: only "Use server filenames" sends it, with a 10 s timeout and no error
+  shown, and the result name is known in advance.
+- **CrossPoint** takes the first suitable EPUB link and ranks `open-access` above other
+  acquisition links, so a book gets one on-demand link at most. In `FILENAME` mode it builds the
+  name itself and ignores the server's, so matching by name needs SMART mode.
+
 ## Storage model
 
 - `progress_events` is append-only (an `UPDATE` trigger aborts). Every accepted

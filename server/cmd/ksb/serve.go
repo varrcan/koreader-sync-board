@@ -20,6 +20,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/library"
 	"github.com/varrcan/koreader-sync-board/server/internal/library/convert"
 	"github.com/varrcan/koreader-sync-board/server/internal/library/lookup"
+	"github.com/varrcan/koreader-sync-board/server/internal/opds"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
@@ -45,7 +46,7 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	}
 	defer db.Close()
 
-	// Один ограничитель на kosync, WebDAV и панель: подбор пароля панели и ключа
+	// Один ограничитель на kosync, WebDAV, OPDS и панель: подбор пароля панели и ключа
 	// устройства с одного адреса расходует общий бюджет.
 	limiter := ratelimit.New(log)
 	acc := accounts.New(db, accounts.WithLimiter(limiter))
@@ -114,6 +115,7 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 			PasswordLoginUnlinkedOnly: !cfg.PanelPasswordLogin,
 		}),
 		WebDAV: webdav.New(acc, stats, ip, log),
+		OPDS:   opds.New(acc, ip, opds.Library{Store: lib, Covers: covers, Converter: converter}, log),
 		Web:    web.Handler(),
 	})
 	srv := &http.Server{

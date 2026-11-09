@@ -529,7 +529,7 @@ func TestResultName(t *testing.T) {
 		{"Пикник.fb2.zip", "fb2.zip", "Пикник.epub"},
 		{"a.b.FB2", "fb2", "a.b.epub"},
 	} {
-		if got := resultName(tt.rel, tt.format); got != tt.want {
+		if got := ResultName(tt.rel, tt.format); got != tt.want {
 			t.Errorf("%s: %q, want %q", tt.rel, got, tt.want)
 		}
 	}

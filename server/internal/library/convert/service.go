@@ -208,7 +208,7 @@ func (s *Service) produce(ctx context.Context, id int64, loc library.FileLocatio
 	if c.Meta, err = meta.Parse(tmp, "epub"); err != nil {
 		c.Meta, c.MetaErr = meta.Book{}, err.Error()
 	}
-	name := resultName(loc.Path, loc.Format)
+	name := ResultName(loc.Path, loc.Format)
 	if err := os.Rename(tmp, filepath.Join(dir, name)); err != nil {
 		return 0, err
 	}
@@ -217,10 +217,10 @@ func (s *Service) produce(ctx context.Context, id int64, loc library.FileLocatio
 	return s.store.AddConverted(ctx, c)
 }
 
-// resultName — базовое имя источника с расширением .epub без нормализации Unicode:
+// ResultName — базовое имя источника с расширением .epub без нормализации Unicode:
 // CrossPoint в режиме FILENAME хеширует имя файла на устройстве. Имя .fb2 длиной 255
 // байт укорачивается по границе символа: .epub на байт длиннее.
-func resultName(rel, format string) string {
+func ResultName(rel, format string) string {
 	base := path.Base(rel)
 	stem := base[:len(base)-len(format)-1]
 	for len(stem)+len(".epub") > maxName {

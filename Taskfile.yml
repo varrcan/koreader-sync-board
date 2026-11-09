@@ -72,6 +72,14 @@ tasks:
     cmds:
       - go -C server run ./internal/hashing/internal/goldengen -luajit '{{.LUAJIT}}'
 
+  opds:golden:
+    desc: Пересчитать снимок ленты OPDS и эталон его разбора парсером KOReader (нужны LuaJIT и сеть; LUAJIT=команда переопределяет)
+    vars:
+      LUAJIT: '{{.LUAJIT | default "luajit"}}'
+    cmds:
+      - go -C server test ./internal/opds -run '^TestFeedSnapshot$' -args -update
+      - go -C server run ./internal/opds/internal/goldengen -luajit '{{.LUAJIT}}'
+
   docker:
     desc: Собрать образ ksb:dev
     cmds:

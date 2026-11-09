@@ -290,6 +290,22 @@ edits of the book.
   as the edit exists. Complying with the
   [Google APIs Terms of Service](https://developers.google.com/terms) is up to the owner of the key.
 
+### OPDS catalog
+
+The library is also available as an OPDS 1.2 catalog at `/opds`, for KOReader, CrossPoint and
+other OPDS readers. It offers every book newest first, search, all files of a book with their
+format and size, and covers. A downloaded file is byte-for-byte the library file, so progress
+syncs against the same book. A book that has an FB2 but no EPUB also gets an EPUB link: the
+file is converted on the first download and kept, like a conversion from the panel.
+
+In KOReader: the search tab of the file manager → **OPDS catalog** → menu in the title bar →
+**Add catalog**, with the URL `https://your-server/opds`, your panel username and a **device
+password** (not the panel password). Revoking the device closes the catalog on it. Without a
+library the catalog is simply empty.
+
+The catalog uses HTTP Basic, so over plain `http://` the device password travels unencrypted:
+expose it through a TLS reverse proxy, as you would the WebDAV endpoint.
+
 ## Configuration
 
 | Variable | Default | Meaning |
@@ -381,15 +397,16 @@ Every failed login is logged as one JSON line with the client address:
 {"time":"2026-11-04T21:47:10.84+03:00","level":"WARN","msg":"kosync: authorization failed","user":"alice","ip":"198.51.100.7","path":"/users/auth","reason":"unauthorized"}
 {"time":"2026-11-04T21:48:02.11+03:00","level":"WARN","msg":"panel: authorization failed","user":"alice","ip":"198.51.100.7","path":"/api/v1/auth/login","reason":"unauthorized"}
 {"time":"2026-11-04T21:49:31.52+03:00","level":"WARN","msg":"webdav: authorization failed","user":"alice","ip":"198.51.100.7","path":"/dav/statistics.sqlite3","reason":"unauthorized"}
+{"time":"2026-11-04T21:50:12.03+03:00","level":"WARN","msg":"opds: authorization failed","user":"alice","ip":"198.51.100.7","path":"/opds","reason":"unauthorized"}
 ```
 
-Repeats of an already rejected password and requests refused because of a block are not
-logged. To ban persistent offenders for longer, create `/etc/fail2ban/filter.d/ksb.conf`:
+Repeats of an already rejected password, requests refused because of a block and OPDS
+requests without any password (many clients try that first) are not logged. To ban persistent offenders for longer, create `/etc/fail2ban/filter.d/ksb.conf`:
 
 ```ini
 [Definition]
 # Matches the plain JSON line and Docker's json-file log, where quotes are escaped.
-failregex = \\?"msg\\?":\\?"(?:kosync|panel|webdav): authorization failed\\?".*\\?"ip\\?":\\?"<HOST>\\?",\\?"path\\?"
+failregex = \\?"msg\\?":\\?"(?:kosync|panel|webdav|opds): authorization failed\\?".*\\?"ip\\?":\\?"<HOST>\\?",\\?"path\\?"
 datepattern = "time\\?":\\?"%%Y-%%m-%%dT%%H:%%M:%%S(?:\.\d+)?%%z
 ```
 

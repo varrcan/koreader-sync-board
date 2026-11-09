@@ -164,6 +164,14 @@
         "turnOn": "Turn on",
         "cloudStoragePlus": "Cloud storage+",
         "vocabularyBuilder": "Vocabulary builder",
+        "search": "Search",
+        "opdsCatalog": "OPDS catalog",
+        "addCatalog": "Add catalog",
+        "catalogName": "Catalog name",
+        "catalogUrl": "Catalog URL",
+        "catalogUsername": "Username (optional)",
+        "catalogPassword": "Password (optional)",
+        "serverFilenames": "Use server filenames",
         "logout": "Logout"
       }
     },
@@ -300,6 +308,7 @@
     },
     "search": "Title, author, series or file name",
     "rootsLink": "Roots and scanning",
+    "opdsLink": "Connect a reader",
     "empty": "There are no books in the library yet.",
     "emptyAdmin": "No book folders have been added yet.",
     "noResults": "Nothing found.",
@@ -431,9 +440,32 @@
         "title": "Statistics and vocabulary",
         "text": "Syncing reading statistics and the vocabulary over WebDAV, uploading a statistics file, how the numbers are counted."
       },
+      "opds": {
+        "title": "OPDS catalog",
+        "text": "Opening the library on a reader: adding the catalog, EPUB from FB2, names of downloaded files."
+      },
       "troubleshooting": {
         "title": "Troubleshooting",
         "text": "Login and sync errors, unknown books, position not carried over to another reader."
+      }
+    },
+    "opds": {
+      "intro": "The catalog shows the server's library right on the reader: browse, search and download books without a computer. A downloaded file is byte-for-byte the library file, so progress stays attached to the same book.",
+      "setup": {
+        "title": "Connecting KOReader",
+        "open": "Open the <search/> tab in the file manager → <opdsCatalog/>. Tap the menu button in the title bar and choose <addCatalog/>.",
+        "name": "Enter any name in <catalogName/>, the address below in <catalogUrl/> and your panel username in <catalogUsername/>.",
+        "address": "Catalog address",
+        "password": "<catalogPassword/> takes a device password from the <a>Devices screen</a>, not the panel password. Revoking the device closes the catalog on it too."
+      },
+      "epub": {
+        "title": "EPUB for FB2 books",
+        "text": "When a book has an FB2 file but no EPUB, the catalog also offers an EPUB link. The file is created on the first download and stays in the library: later downloads return the same bytes.",
+        "timeout": "This usually takes under a second. If the reader reports a timeout, just download again: the server finishes the conversion and returns the ready file."
+      },
+      "filenames": {
+        "title": "Names of downloaded files",
+        "text": "KOReader names the file after the catalog entry. This does not matter for progress sync while <matchingMethod/> is set to <matchingBinary/>. With <matchingFilename/> the name must match the library file: turn on <serverFilenames/> in the catalog settings."
       }
     },
     "progress": {

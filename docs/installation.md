@@ -3,6 +3,7 @@
 English | [Русский](ru/installation.md)
 
 - [Docker](#docker)
+- [Docker Compose](#docker-compose)
 - [Binary](#binary)
 - [systemd](#systemd)
 - [First run](#first-run)
@@ -31,6 +32,40 @@ docker run -d --name ksb -v "$PWD/data:/data" -p 8080:8080 \
 
 The image has a built-in health check (`ksb healthcheck`, which requests `/api/v1/health`). The
 `ksb` command line is available inside the container as `docker exec ksb /ksb …`.
+
+## Docker Compose
+
+`compose.yaml`:
+
+```yaml
+services:
+  ksb:
+    image: ghcr.io/varrcan/koreader-sync-board:latest
+    container_name: ksb
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      KSB_LIBRARY_SCAN_INTERVAL: 6h
+      # KSB_GOOGLE_BOOKS_API_KEY: "..."
+    volumes:
+      - ksb-data:/data
+      # Book folder for the library, read-only.
+      - /srv/books:/books:ro
+
+volumes:
+  ksb-data:
+```
+
+```sh
+docker compose up -d
+docker compose pull && docker compose up -d   # update
+```
+
+`container_name: ksb` keeps the `docker exec ksb /ksb …` and `docker logs ksb` commands from this
+documentation working. Other settings go under `environment` (see
+[Configuration](configuration.md)). Add the `/books` folder on the **Library** screen of the panel
+(see [Library](library.md)); drop that line if you do not need a library.
 
 ## Binary
 

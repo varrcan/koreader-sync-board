@@ -3,6 +3,7 @@
 [English](../installation.md) | Русский
 
 - [Docker](#docker)
+- [Docker Compose](#docker-compose)
 - [Бинарник](#бинарник)
 - [systemd](#systemd)
 - [Первый запуск](#первый-запуск)
@@ -31,6 +32,40 @@ docker run -d --name ksb -v "$PWD/data:/data" -p 8080:8080 \
 
 В образ встроена проверка здоровья (`ksb healthcheck`, запрос к `/api/v1/health`). Командная
 строка `ksb` доступна внутри контейнера как `docker exec ksb /ksb …`.
+
+## Docker Compose
+
+`compose.yaml`:
+
+```yaml
+services:
+  ksb:
+    image: ghcr.io/varrcan/koreader-sync-board:latest
+    container_name: ksb
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      KSB_LIBRARY_SCAN_INTERVAL: 6h
+      # KSB_GOOGLE_BOOKS_API_KEY: "..."
+    volumes:
+      - ksb-data:/data
+      # Каталог книг для библиотеки, только для чтения.
+      - /srv/books:/books:ro
+
+volumes:
+  ksb-data:
+```
+
+```sh
+docker compose up -d
+docker compose pull && docker compose up -d   # обновление
+```
+
+`container_name: ksb` оставляет рабочими команды `docker exec ksb /ksb …` и `docker logs ksb` из
+этой документации. Остальные настройки — в `environment` (см. [Настройка](configuration.md)).
+Каталог `/books` добавьте на экране **Библиотека** в панели (см. [Библиотека](library.md)); если
+библиотека не нужна, уберите эту строку.
 
 ## Бинарник
 

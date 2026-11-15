@@ -2,6 +2,7 @@
 openspec/
 .claude/
 .codex/
+.agents/
 CLAUDE.md
 
 # Личные книги для локального теста-оракула partial MD5 — никогда не публикуются

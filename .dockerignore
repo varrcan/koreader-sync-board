@@ -8,6 +8,7 @@ bin
 .local
 .claude
 .codex
+.agents
 openspec
 CLAUDE.md
 data

@@ -18,7 +18,7 @@ restart.
   code 2001, plus a `Retry-After` header for other clients). A blocked `POST /users/create` gets
   402/2005 with a similar text.
 - A device that has logged in recently keeps syncing from a blocked address: the server
-  remembers successful checks, and every request extends that.
+  remembers a successful check and extends it with every request.
 - Sending the **same** wrong password again (for example, a forgotten e-reader whose device was
   revoked) is answered at once and does not count towards the limit, so it cannot lock out the
   other e-readers in the same home network.

@@ -94,7 +94,7 @@ is converted on the first download and kept, like a conversion from the panel.
 In KOReader: the search tab of the file manager → **OPDS catalog** → menu in the title bar →
 **Add catalog**, with the URL `https://<host>/opds`, your username and a **device password**
 (not the panel password). Revoking the device closes the catalog on it. Without a library the
-catalog is simply empty.
+catalog is empty.
 
 The catalog uses HTTP Basic, so over plain `http://` the device password travels unencrypted:
 expose it through a TLS reverse proxy, as you would the WebDAV endpoint.

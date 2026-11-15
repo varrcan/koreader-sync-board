@@ -50,7 +50,7 @@ The settings are the same environment variables as in Docker (see
 [Configuration](configuration.md)), but the default data directory is `/data`, so set
 `KSB_DATA_DIR`. The `ksb user …` and `ksb device …` commands open the database directly: run
 them with the same `KSB_DATA_DIR` and as the same system user as the server. Wherever the
-documentation says `docker exec ksb /ksb`, use that instead.
+documentation says `docker exec ksb /ksb`, run `ksb` directly instead.
 
 ### Building from source
 

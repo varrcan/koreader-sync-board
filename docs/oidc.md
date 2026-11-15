@@ -23,7 +23,7 @@ https://books.example.com/api/v1/auth/oidc/callback
 ```
 
 `KSB_PUBLIC_URL` is the address users open the panel at: an origin only (`https://host` or
-`http://host:port`), without a path — serving the panel under a path prefix is not supported. If
+`http://host:port`), without a path. Serving the panel under a path prefix is not supported. If
 someone opens the panel by another address (a LAN IP, `localhost`), the sign-in button first
 sends them to `KSB_PUBLIC_URL` and the whole sign-in happens there; linking an account (see
 below) only works at the public address, and the panel shows a link to it.
@@ -68,8 +68,8 @@ cannot lock yourself out. A safe switch:
 2. sign in with the password and link the provider account under **Account**;
 3. restart with `KSB_PANEL_PASSWORD_LOGIN=false`.
 
-Signing out of the panel ends only the panel session, not the session at the provider; disabling
-a user at the provider does not end their open panel sessions — use `ksb user disable` for that.
+Signing out of the panel ends only the panel session, not the session at the provider. Disabling
+a user at the provider does not end their open panel sessions: use `ksb user disable` for that.
 
 ## Changing the issuer
 

@@ -1,5 +1,7 @@
 # koreader-sync-board
 
+English | [Русский](README_ru.md)
+
 A lightweight self-hosted server for the **standard** KOReader — no plugins on the device.
 
 - **Progress sync** compatible with the KOReader sync protocol (the same API as
@@ -16,12 +18,15 @@ A lightweight self-hosted server for the **standard** KOReader — no plugins on
 ## Run with Docker
 
 ```sh
-docker build -t koreader-sync-board .
 docker run -d --name ksb \
   -v ksb-data:/data \
   -p 8080:8080 \
-  koreader-sync-board
+  ghcr.io/varrcan/koreader-sync-board:latest
 ```
+
+Images for linux/amd64 and linux/arm64 are tagged by release (`1.2.3`, `1.2`) and `latest`.
+The examples below use the local name `koreader-sync-board`: either build the image from the
+source with `docker build -t koreader-sync-board .` or put the `ghcr.io/…` name in its place.
 
 Use a **named volume** (`ksb-data` above): Docker gives it the right owner on first use.
 The container runs as the unprivileged user `65532`. With a bind mount, make the host
@@ -33,6 +38,86 @@ docker run -d --name ksb -v "$PWD/data:/data" -p 8080:8080 koreader-sync-board
 ```
 
 The image has a built-in health check (`ksb healthcheck`, which requests `/api/v1/health`).
+
+## Run the binary
+
+`ksb` is a single static binary with the panel embedded: it needs neither Docker nor Node at
+runtime, only a writable data directory. Download the archive for your architecture
+(`linux_amd64` or `linux_arm64`) from
+[Releases](https://github.com/varrcan/koreader-sync-board/releases) and check it against
+`SHA256SUMS`:
+
+```sh
+sha256sum -c --ignore-missing SHA256SUMS
+tar -xzf ksb_v1.2.3_linux_amd64.tar.gz
+```
+
+Or build it from source (Go 1.27, Node 22+ with pnpm):
+
+```sh
+pnpm install --frozen-lockfile
+pnpm -F web build
+CGO_ENABLED=0 go -C server build -trimpath -tags webdist -o ../bin/ksb ./cmd/ksb
+```
+
+or `task build` with [Task](https://taskfile.dev). Without the `webdist` tag the panel is
+replaced by a placeholder page. For another machine add `GOOS=linux GOARCH=arm64` (or
+`amd64`): the binary has no CGO and cross-compiles as is.
+
+Run it (a binary built from source is `bin/ksb`):
+
+```sh
+KSB_DATA_DIR=./data ./ksb serve
+```
+
+The settings are the same environment variables as in Docker (see
+[Configuration](#configuration)), but the default data directory is `/data`, so set
+`KSB_DATA_DIR`. The `ksb user …` and `ksb device …` commands open the database directly, so run
+them with the same `KSB_DATA_DIR` and as the same system user as the server; elsewhere in this
+README replace `docker exec ksb /ksb` with that.
+
+### systemd
+
+```sh
+sudo install -m 755 ksb /usr/local/bin/ksb
+sudo useradd --system --home-dir /var/lib/ksb --shell /usr/sbin/nologin ksb
+```
+
+`/etc/systemd/system/ksb.service`:
+
+```ini
+[Unit]
+Description=koreader-sync-board
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ksb
+Group=ksb
+ExecStart=/usr/local/bin/ksb serve
+Environment=KSB_DATA_DIR=/var/lib/ksb
+Environment=KSB_LISTEN=:8080
+# Other settings: one KSB_…=… per line.
+EnvironmentFile=-/etc/ksb.env
+StateDirectory=ksb
+StateDirectoryMode=0750
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now ksb
+sudo -u ksb KSB_DATA_DIR=/var/lib/ksb ksb user add alice
+```
+
+`ProtectSystem=strict` leaves the system read-only except the data directory, which suits
+library folders: the server only reads them. The `ksb` user needs read access to them.
 
 ## First run and signing in to the panel
 

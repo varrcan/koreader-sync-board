@@ -543,7 +543,7 @@ func TestDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Delete(e.ctx, src); !errors.Is(err, library.ErrNotConverted) {
+	if err := s.Delete(e.ctx, src); !errors.Is(err, library.ErrReadOnlyFile) {
 		t.Fatalf("regular file: %v", err)
 	}
 	if err := s.Delete(e.ctx, id); err != nil {

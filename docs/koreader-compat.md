@@ -158,7 +158,15 @@ KOReader syncs `statistics.sqlite3` (and `vocabulary_builder.sqlite3`) only thro
 storage plugin: `plugins/cloudstorage.koplugin` (`main.lua`, `Cloud:sync`;
 `providers/webdav.lua`) and `plugins/statistics.koplugin/main.lua` (`onSync`). The server
 implements just what that client uses under `/dav/`: `PROPFIND`, `GET`/`HEAD`, `PUT`,
-`OPTIONS`. No folders, `DELETE`, `MOVE` or locks; creating a folder from KOReader fails.
+`OPTIONS`. No folders, `DELETE`, `MOVE` or locks in `/dav/` itself; creating a folder from
+KOReader fails.
+
+The only subfolder is `books/`, the shared book drive (the library uploads folder). It is a full
+WebDAV class 2 folder served by `golang.org/x/net/webdav`, and its rules do not apply to `/dav/`:
+`OPTIONS /dav/` still answers `DAV: 1`. `PROPFIND /dav/` with Depth 1 lists `books/` as a
+collection without its contents, Depth 0 does not. KOReader shows it in the folder picker, and
+books can be downloaded from it through the cloud storage browser; this has not been tested on a
+device.
 
 ### The `Cloud:sync` loop
 

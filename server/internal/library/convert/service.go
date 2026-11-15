@@ -90,7 +90,7 @@ func New(ctx context.Context, store *library.Store, dataDir string, log *slog.Lo
 	if err := os.MkdirAll(s.temp, 0o750); err != nil {
 		return nil, err
 	}
-	if err := store.EnsureManagedRoot(ctx, s.converted); err != nil {
+	if err := store.EnsureManagedRoot(ctx, library.ManagedConverted, s.converted); err != nil {
 		return nil, err
 	}
 	return s, nil

@@ -372,7 +372,7 @@
     "scanning": "Scanning…",
     "lastScan": "Last scanned {{when}}",
     "neverScanned": "The library has not been scanned yet.",
-    "emptyUser": "Book folders are added by the server administrator.",
+    "emptyUser": "Book folders on the server are added by the administrator.",
     "scan": "Scan",
     "rootsTitle": "Book folders",
     "rootsDescription": "The server only reads these folders and never changes anything in them. New and changed files are found by a scan: after a folder is added, on schedule and with the Scan button.",
@@ -396,7 +396,8 @@
     "rootsLink": "Folders and scanning",
     "opdsLink": "Connect a reader",
     "empty": "There are no books in the library yet.",
-    "emptyAdmin": "No book folders have been added yet.",
+    "emptyAdmin": "Book folders on the server are added under “Folders and scanning”.",
+    "emptyUpload": "Upload books with the “Upload books” button or drop files onto the page. You can also put them into the WebDAV folder: anything you add there shows up here.",
     "noResults": "Nothing found.",
     "detail": {
       "notFound": "Book not found",
@@ -422,7 +423,9 @@
       "mergeConfirmText": "“{{from}}” will be merged into “{{into}}”. To undo, split the files back out.",
       "mergeConfirm": "Merge",
       "mergeBack": "Back",
-      "description": "Description"
+      "description": "Description",
+      "uploaded": "Uploaded",
+      "deleteUploadedDescription": "The file will be removed from the library and the uploads folder. Reading progress is kept."
     },
     "metadata": {
       "button": "Metadata",
@@ -447,6 +450,21 @@
       "reset": "Reset to file data",
       "resetConfirm": "Remove edits",
       "source": "Data: {{name}}"
+    },
+    "upload": {
+      "button": "Upload books",
+      "title": "Uploads",
+      "drop": "Drop the files to upload them to the library",
+      "waiting": "Queued",
+      "done": "Uploaded",
+      "doneAs": "Uploaded as “{{name}}”",
+      "openBook": "Open the book",
+      "clear": "Clear",
+      "clearFinished": "Clear finished",
+      "tooLarge": "The file is larger than 1 GiB.",
+      "webdavTitle": "WebDAV folder",
+      "webdavAddress": "Folder address",
+      "webdavHint": "Mount the address as a network drive. Use your username and the password of any of your devices from “Devices”. Windows accepts password sign-in only over HTTPS."
     }
   },
   "errors": {
@@ -490,11 +508,15 @@
     "conversion_too_large": "The file is too large to convert: over 128 MiB unpacked.",
     "conversion_failed": "Could not convert the file: it may be damaged.",
     "conversion_timeout": "The conversion did not finish in time. Press again: the result may already be saved.",
-    "not_converted": "Only a converted file can be deleted.",
     "file_unavailable": "The file is unavailable: its folder is offline or the file was removed.",
     "library_not_found": "This is no longer in the library. Refresh the page.",
     "invalid_metadata": "Check the values: one of the fields is too long or invalid.",
-    "cover_unavailable": "Could not download the cover. Untick it or try again later."
+    "cover_unavailable": "Could not download the cover. Untick it or try again later.",
+    "file_read_only": "Files in server folders cannot be deleted: the server only reads them.",
+    "unsupported_format": "The library does not accept this format. Supported: EPUB, FB2, FB2.ZIP, PDF, DjVu, MOBI, AZW and CBZ.",
+    "empty_file": "The file is empty.",
+    "invalid_name": "Invalid file name: it starts with a dot or contains characters that are not allowed.",
+    "file_exists": "This book is already in the library."
   },
   "statistics": {
     "title": "Reading statistics",

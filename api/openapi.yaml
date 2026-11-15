@@ -1079,6 +1079,69 @@ paths:
                 $ref: "#/components/schemas/Error"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/library/uploads:
+    post:
+      operationId: uploadLibraryFile
+      summary: Загрузить книгу
+      description: |
+        Любому пользователю. Тело — содержимое одного файла. Файл сохраняется в корень загрузок;
+        если имя занято, перед расширением книги добавляется суффикс ` (2)`, ` (3)` и так далее.
+        После загрузки ставится в очередь скан корня загрузок, книга появляется в каталоге
+        по его окончании. Ошибки имени и формата отдаются до чтения тела.
+      tags: [library]
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: Имя файла. Приводится к NFC.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "201":
+          description: Файл сохранён
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryUploadResult"
+        "400":
+          description: |
+            `invalid_name`: имя пустое, длиннее 255 байт, начинается с точки или содержит `/`, `\`,
+            управляющие символы; `empty_file`: пустое тело; `bad_request`: тело не дочитано
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/CrossOrigin"
+        "409":
+          description: "`file_exists`: файл с тем же содержимым уже есть в библиотеке"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LibraryUploadConflict"
+        "413":
+          description: "`file_too_large`: файл больше 1 GiB"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "415":
+          description: "`unsupported_format`: расширение не из списка форматов библиотеки"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/library/books:
     get:
       operationId: listLibraryBooks
@@ -1316,8 +1379,11 @@ paths:
       - $ref: "#/components/parameters/LibraryFileID"
     delete:
       operationId: deleteLibraryFile
-      summary: Удалить сконвертированный файл
-      description: Только администратор и только файл, созданный конвертацией. Прогресс по нему сохраняется.
+      summary: Удалить загруженный или сконвертированный файл
+      description: |
+        Загруженный файл удаляет любой пользователь, сконвертированный — только администратор.
+        Файлы обычных корней не удаляются. Прогресс по файлу сохраняется. Загруженный файл,
+        которого уже нет на диске, удаляется из индекса с тем же ответом.
       tags: [library]
       responses:
         "204":
@@ -1325,7 +1391,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: "`forbidden` (не администратор) или `cross_origin`"
+          description: "`forbidden` (сконвертированный файл, не администратор) или `cross_origin`"
           content:
             application/json:
               schema:
@@ -1333,7 +1399,7 @@ paths:
         "404":
           $ref: "#/components/responses/LibraryNotFound"
         "409":
-          description: "`not_converted` — файл из обычного корня."
+          description: "`file_read_only` — файл из обычного корня."
           content:
             application/json:
               schema:
@@ -1773,7 +1839,7 @@ components:
           format: date-time
     LibraryFile:
       type: object
-      required: [id, root_name, path, format, size, title, authors, pinned, converted, convertible, progress]
+      required: [id, root_name, path, format, size, title, authors, pinned, converted, uploaded, convertible, progress]
       properties:
         id:
           type: integer
@@ -1801,6 +1867,9 @@ components:
         converted:
           type: boolean
           description: Файл создан конвертацией.
+        uploaded:
+          type: boolean
+          description: Файл лежит в корне загрузок.
         convertible:
           type: boolean
           description: Формат FB2, и результата конвертации этого содержимого нет.
@@ -1808,6 +1877,23 @@ components:
           allOf:
             - $ref: "#/components/schemas/LibraryFileProgress"
           nullable: true
+    LibraryUploadResult:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Итоговое имя файла в корне загрузок.
+    LibraryUploadConflict:
+      allOf:
+        - $ref: "#/components/schemas/Error"
+        - type: object
+          required: [book_id]
+          properties:
+            book_id:
+              type: integer
+              format: int64
+              description: Книга, в которой уже есть файл с тем же содержимым.
     LibraryConvertResult:
       type: object
       required: [file_id]

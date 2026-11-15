@@ -63,9 +63,11 @@ The proxy must also:
   foreign site; over plain `http://` browsers do not send `Sec-Fetch-Site`, so the server
   compares `Origin` with `Host`, and a rewritten `Host` makes every sign-in fail with
   `cross_origin`;
-- keep the `ETag` response header and the `If-Match` request header on `/dav/` and allow request
-  bodies up to 64 MiB (nginx: `client_max_body_size 64m;`). Without `ETag` KOReader uploads
-  without `If-Match`, gets `412` and retries forever.
+- keep the `ETag` response header and the `If-Match` request header on `/dav/`. Without `ETag`
+  KOReader uploads without `If-Match`, gets `412` and retries forever;
+- allow request bodies up to 1 GiB (nginx: `client_max_body_size 1g;`). Book uploads from the
+  panel and to `/dav/books/` are limited to 1 GiB per file; statistics alone need 64 MiB. With a
+  lower limit the proxy rejects larger books before they reach the server.
 
 ## fail2ban
 

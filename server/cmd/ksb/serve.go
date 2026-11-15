@@ -28,6 +28,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/sso"
 	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
+	"github.com/varrcan/koreader-sync-board/server/internal/uploads"
 	"github.com/varrcan/koreader-sync-board/server/internal/web"
 	"github.com/varrcan/koreader-sync-board/server/internal/webdav"
 )
@@ -79,6 +80,18 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	prog := progress.New(db)
 	stats := statistics.New(db, cfg.DataDir, log)
 	lib := library.NewStore(db)
+	uploadsPath := filepath.Join(cfg.DataDir, "uploads")
+	if err := lib.EnsureManagedRoot(ctx, library.ManagedUploads, uploadsPath); err != nil {
+		return fmt.Errorf("uploads: %w", err)
+	}
+	uploadsDir, err := uploads.Open(uploadsPath)
+	if err != nil {
+		return fmt.Errorf("uploads: %w", err)
+	}
+	defer func() { _ = uploadsDir.Close() }()
+	if err := uploadsDir.CleanTemp(); err != nil {
+		log.Warn("uploads: cleanup failed", "error", err)
+	}
 	covers := library.NewCovers(filepath.Join(cfg.DataDir, "covers"))
 	scanner := library.NewScanner(lib, cfg.LibraryScanInterval, log, library.WithCovers(covers))
 	convertCtx, stopConvert := context.WithCancel(ctx)
@@ -107,14 +120,14 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 			Library: apiv1.Library{
 				Store: lib, Scanner: scanner, Covers: covers, Files: library.NewFileReader(),
 				Lookup: lookup.New(db, cfg.GoogleBooksAPIKey, log), CoverSource: lookup.NewCoverFetcher(),
-				Converter: converter,
+				Converter: converter, Uploads: uploadsDir,
 			},
 			Log: log,
 			SSO: provider,
 
 			PasswordLoginUnlinkedOnly: !cfg.PanelPasswordLogin,
 		}),
-		WebDAV: webdav.New(acc, stats, ip, log),
+		WebDAV: webdav.New(acc, stats, &webdav.Books{Dir: uploadsDir, Changed: scanner.TriggerUploads}, ip, log),
 		OPDS:   opds.New(acc, ip, opds.Library{Store: lib, Covers: covers, Converter: converter}, log),
 		Web:    web.Handler(),
 	})

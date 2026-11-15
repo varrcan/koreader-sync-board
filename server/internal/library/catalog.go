@@ -61,17 +61,17 @@ type FileProgress struct {
 }
 
 // File — файл книги библиотеки. Progress — nil, если пользователь его не читал.
-// Converted — файл создан конвертацией, Convertible — это FB2, и результата для его
-// содержимого нет.
+// Converted — файл создан конвертацией, Uploaded — лежит в корне загрузок,
+// Convertible — это FB2, и результата для его содержимого нет.
 type File struct {
-	ID                     int64
-	RootName, Path         string
-	Format                 string
-	Size                   int64
-	Title, Authors         *string
-	Pinned                 bool
-	Converted, Convertible bool
-	Progress               *FileProgress
+	ID                               int64
+	RootName, Path                   string
+	Format                           string
+	Size                             int64
+	Title, Authors                   *string
+	Pinned                           bool
+	Converted, Uploaded, Convertible bool
+	Progress                         *FileProgress
 }
 
 // BookDetail — книга и её файлы по возрастанию id. Description и Metadata — nil,
@@ -325,7 +325,7 @@ func fillFiles(ctx context.Context, tx *sql.Tx, books []Book) error {
 
 func bookFiles(ctx context.Context, tx *sql.Tx, bookID int64) ([]File, error) {
 	rows, err := tx.QueryContext(ctx, `
-		SELECT f.id, r.name, f.path, f.format, f.size, f.title, f.authors, f.pinned, r.managed,
+		SELECT f.id, r.name, f.path, f.format, f.size, f.title, f.authors, f.pinned, r.managed = 1, r.managed = 2,
 			f.format IN ('fb2', 'fb2.zip')
 				AND NOT EXISTS (SELECT 1 FROM library_files c WHERE c.source_md5 = f.partial_md5)
 		FROM library_files f JOIN library_roots r ON r.id = f.root_id
@@ -341,7 +341,7 @@ func bookFiles(ctx context.Context, tx *sql.Tx, bookID int64) ([]File, error) {
 			title, authors sql.NullString
 		)
 		if err := rows.Scan(&f.ID, &f.RootName, &f.Path, &f.Format, &f.Size, &title, &authors, &f.Pinned,
-			&f.Converted, &f.Convertible); err != nil {
+			&f.Converted, &f.Uploaded, &f.Convertible); err != nil {
 			return nil, err
 		}
 		f.Title, f.Authors = nullable(title), nullable(authors)

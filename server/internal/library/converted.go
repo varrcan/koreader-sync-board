@@ -4,16 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/library/meta"
 )
 
-// ErrNotConverted — файл лежит в обычном корне, удалять его сервер не вправе.
-var ErrNotConverted = errors.New("file is not a conversion result")
+// ErrReadOnlyFile — файл лежит не в том корне, из которого его удаляют: в обычном
+// корне сервер ничего не удаляет, а вид корня мог смениться между проверками.
+var ErrReadOnlyFile = errors.New("file is read-only")
 
 // Converted — готовый результат конвертации. Path — относительно служебного корня.
 // SourceMD5 — partial MD5 содержимого, из которого он сделан: источник мог измениться,
@@ -27,27 +26,6 @@ type Converted struct {
 	Hashes      []string
 	Meta        meta.Book
 	MetaErr     string
-}
-
-// EnsureManagedRoot создаёт каталог служебного корня и записывает его абсолютный путь.
-// Путь обновляется при каждом запуске: каталог данных могли перенести. Путь, занятый
-// обычным корнем, — ошибка.
-func (s *Store) EnsureManagedRoot(ctx context.Context, dir string) error {
-	// within сравнивает строки, а KSB_DATA_DIR может быть относительным.
-	dir, err := filepath.Abs(dir)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	if _, err := s.db.Write.ExecContext(ctx, `
-		INSERT INTO library_roots (name, path, created_at, managed) VALUES (?, ?, ?, 1)
-		ON CONFLICT (managed) WHERE managed = 1 DO UPDATE SET path = excluded.path`,
-		filepath.Base(dir), dir, s.now().Unix()); err != nil {
-		return fmt.Errorf("managed root %s: %w", dir, err)
-	}
-	return nil
 }
 
 // ConvertedFile — id результата конвертации содержимого sourceMD5 или 0, если его нет.
@@ -106,7 +84,7 @@ func (s *Store) AddConverted(ctx context.Context, c Converted) (int64, error) {
 
 // DeleteConverted убирает результат конвертации из индекса и возвращает его каталог на
 // диске: удаляет каталог вызывающий, после фиксации транзакции. Прогресс привязан к
-// хешам и не меняется. Файла нет — ErrFileNotFound, файл обычного корня — ErrNotConverted.
+// хешам и не меняется. Файла нет — ErrFileNotFound, файл не из корня конвертаций — ErrReadOnlyFile.
 func (s *Store) DeleteConverted(ctx context.Context, id int64) (string, error) {
 	tx, err := s.db.Write.BeginTx(ctx, nil)
 	if err != nil {
@@ -116,7 +94,7 @@ func (s *Store) DeleteConverted(ctx context.Context, id int64) (string, error) {
 	var (
 		root    string
 		source  sql.NullString
-		managed bool
+		managed ManagedKind
 		bookID  int64
 	)
 	err = tx.QueryRowContext(ctx, `
@@ -129,8 +107,8 @@ func (s *Store) DeleteConverted(ctx context.Context, id int64) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !managed || !source.Valid {
-		return "", ErrNotConverted
+	if managed != ManagedConverted || !source.Valid {
+		return "", ErrReadOnlyFile
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM library_files WHERE id = ?`, id); err != nil {
 		return "", err

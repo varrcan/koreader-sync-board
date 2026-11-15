@@ -38,6 +38,18 @@ var (
 	ErrSingleFile = errors.New("file is the only one in its book")
 )
 
+// ManagedKind — вид корня (library_roots.managed): обычный или служебный в каталоге данных.
+type ManagedKind int
+
+const (
+	// ManagedNone — обычный корень, который подключил администратор.
+	ManagedNone ManagedKind = 0
+	// ManagedConverted — результаты конвертации. Не сканируется: файлы вносит AddConverted.
+	ManagedConverted ManagedKind = 1
+	// ManagedUploads — загрузки из панели и WebDAV. Сканируется вместе с обычными.
+	ManagedUploads ManagedKind = 2
+)
+
 // Root — корень библиотеки.
 type Root struct {
 	ID        int64
@@ -46,6 +58,7 @@ type Root struct {
 	Files     int
 	ScannedAt *time.Time
 	Error     *string
+	Managed   ManagedKind
 }
 
 // Store — таблицы библиотеки.
@@ -58,7 +71,7 @@ type Store struct {
 func NewStore(db *store.DB) *Store { return &Store{db: db, now: time.Now} }
 
 const rootColumns = `r.id, r.name, r.path,
-	(SELECT count(*) FROM library_files f WHERE f.root_id = r.id), r.scanned_at, r.error`
+	(SELECT count(*) FROM library_files f WHERE f.root_id = r.id), r.scanned_at, r.error, r.managed`
 
 func scanRoot(row interface{ Scan(...any) error }) (Root, error) {
 	var (
@@ -66,7 +79,7 @@ func scanRoot(row interface{ Scan(...any) error }) (Root, error) {
 		scanned sql.NullInt64
 		msg     sql.NullString
 	)
-	if err := row.Scan(&r.ID, &r.Name, &r.Path, &r.Files, &scanned, &msg); err != nil {
+	if err := row.Scan(&r.ID, &r.Name, &r.Path, &r.Files, &scanned, &msg, &r.Managed); err != nil {
 		return Root{}, err
 	}
 	if scanned.Valid {
@@ -79,13 +92,28 @@ func scanRoot(row interface{ Scan(...any) error }) (Root, error) {
 	return r, nil
 }
 
-// Roots возвращает корни в порядке добавления, без служебного: файлы в нём появляются
-// только через конвертацию, показывать и сканировать там нечего.
+// Roots возвращает корни в порядке добавления, без служебных: их держит сервер, и
+// администратору в списке нечего с ними делать.
 func (s *Store) Roots(ctx context.Context) ([]Root, error) {
 	return s.queryRoots(ctx, `WHERE r.managed = 0`)
 }
 
-// allRoots — корни вместе со служебным.
+// scanRoots — корни, которые обходит сканер: обычные и загрузки. Файлы корня
+// конвертаций появляются только через AddConverted.
+func (s *Store) scanRoots(ctx context.Context) ([]Root, error) {
+	return s.queryRoots(ctx, `WHERE r.managed IN (0, 2)`)
+}
+
+// uploadsRoot — служебный корень загрузок или ErrNotFound, если его не создали.
+func (s *Store) uploadsRoot(ctx context.Context) (Root, error) {
+	r, err := scanRoot(s.db.Read.QueryRowContext(ctx, `SELECT `+rootColumns+` FROM library_roots r WHERE r.managed = 2`))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Root{}, ErrNotFound
+	}
+	return r, err
+}
+
+// allRoots — корни вместе со служебными.
 func (s *Store) allRoots(ctx context.Context) ([]Root, error) {
 	return s.queryRoots(ctx, ``)
 }
@@ -125,8 +153,8 @@ func (s *Store) AddRoot(ctx context.Context, path, name string) (Root, error) {
 	if err := checkDir(path); err != nil {
 		return Root{}, err
 	}
-	// Со служебным корнем: иначе каталог данных можно добавить как обычный корень, и
-	// сконвертированные файлы проиндексируются дважды.
+	// Со служебными корнями: иначе каталог данных можно добавить как обычный корень, и
+	// сконвертированные и загруженные файлы проиндексируются дважды.
 	roots, err := s.allRoots(ctx)
 	if err != nil {
 		return Root{}, err
@@ -162,6 +190,30 @@ func (s *Store) AddRoot(ctx context.Context, path, name string) (Root, error) {
 		return Root{}, err
 	}
 	return Root{ID: id, Name: name, Path: path}, nil
+}
+
+// EnsureManagedRoot создаёт каталог служебного корня вида kind и записывает его абсолютный
+// путь. Путь обновляется при каждом запуске: каталог данных могли перенести. Путь, занятый
+// другим корнем, — ошибка.
+func (s *Store) EnsureManagedRoot(ctx context.Context, kind ManagedKind, dir string) error {
+	if kind == ManagedNone {
+		return errors.New("managed root kind required")
+	}
+	// within сравнивает строки, а KSB_DATA_DIR может быть относительным.
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if _, err := s.db.Write.ExecContext(ctx, `
+		INSERT INTO library_roots (name, path, created_at, managed) VALUES (?, ?, ?, ?)
+		ON CONFLICT (managed) WHERE managed <> 0 DO UPDATE SET path = excluded.path`,
+		filepath.Base(dir), dir, s.now().Unix(), kind); err != nil {
+		return fmt.Errorf("managed root %s: %w", dir, err)
+	}
+	return nil
 }
 
 // checkDir: path — существующий каталог, который процесс может прочитать.
@@ -309,11 +361,20 @@ func (s *Store) apply(ctx context.Context, rootID int64, cs []change) error {
 			pinned bool
 		)
 		if c.id != 0 {
-			if err := tx.QueryRowContext(ctx, `SELECT book_id, pinned FROM library_files WHERE id = ?`, c.id).
-				Scan(&bookID, &pinned); err != nil {
+			err := tx.QueryRowContext(ctx, `SELECT book_id, pinned FROM library_files WHERE id = ?`, c.id).
+				Scan(&bookID, &pinned)
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+				// Строку удалили, пока сканер читал файл (удаление загруженного из
+				// панели). Файл сканер только что видел, поэтому он вносится заново;
+				// если его уже нет на диске, запись уберёт скан загрузок, который
+				// ставит удаление.
+				c.id = 0
+			case err != nil:
 				return err
+			default:
+				affected = append(affected, bookID)
 			}
-			affected = append(affected, bookID)
 		}
 		// Книгу закреплённого файла задал человек: ключ её не переопределяет.
 		if !pinned {
@@ -477,14 +538,16 @@ type coverFile struct {
 	root, path, format string
 }
 
-// uncheckedCovers — страница файлов с непроверенной обложкой. Форматы отбираются
-// здесь, поэтому файлы остальных форматов не открываются.
-func (s *Store) uncheckedCovers(ctx context.Context, after int64, limit int) ([]coverFile, error) {
+// uncheckedCovers — страница файлов с непроверенной обложкой; rootID != 0 — только
+// файлы этого корня. Форматы отбираются здесь, поэтому файлы остальных форматов не
+// открываются.
+func (s *Store) uncheckedCovers(ctx context.Context, rootID, after int64, limit int) ([]coverFile, error) {
 	rows, err := s.db.Read.QueryContext(ctx, `
 		SELECT f.id, r.path, f.path, f.format
 		FROM library_files f JOIN library_roots r ON r.id = f.root_id
 		WHERE f.cover_checked = 0 AND f.format IN ('epub', 'fb2', 'fb2.zip') AND f.id > ?
-		ORDER BY f.id LIMIT ?`, after, limit)
+			AND (? = 0 OR f.root_id = ?)
+		ORDER BY f.id LIMIT ?`, after, rootID, rootID, limit)
 	if err != nil {
 		return nil, err
 	}

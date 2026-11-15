@@ -22,6 +22,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
 	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
+	"github.com/varrcan/koreader-sync-board/server/internal/uploads"
 )
 
 // lockedBuffer — лог сервера, в который пишут горутины httptest.
@@ -52,7 +53,7 @@ type env struct {
 	stats *statistics.Store
 	logs  *lockedBuffer
 	srv   *Server
-	// dataDir — каталог данных конвертера.
+	// dataDir — каталог данных конвертера и загрузок.
 	dataDir string
 }
 
@@ -71,6 +72,15 @@ func newEnv(t *testing.T, statsOpts ...statistics.Option) *env {
 	setup := panelauth.NewSetup(acc, lim)
 	stats := statistics.New(db, t.TempDir(), log, statsOpts...)
 	lib := library.NewStore(db)
+	dataDir := t.TempDir()
+	if err := lib.EnsureManagedRoot(ctx, library.ManagedUploads, filepath.Join(dataDir, "uploads")); err != nil {
+		t.Fatal(err)
+	}
+	up, err := uploads.Open(filepath.Join(dataDir, "uploads"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { up.Close() })
 	covers := library.NewCovers(filepath.Join(t.TempDir(), "covers"))
 	scanner := library.NewScanner(lib, 0, log, library.WithCovers(covers))
 	scanCtx, stopScanner := context.WithCancel(ctx)
@@ -79,10 +89,10 @@ func newEnv(t *testing.T, statsOpts ...statistics.Option) *env {
 	t.Cleanup(func() { stopScanner(); <-scannerDone })
 	api := &Server{Accounts: acc, Auth: panelauth.New(acc, nil, log), Setup: setup,
 		Progress: progress.New(db), Statistics: stats, Log: log,
-		Library: Library{Store: lib, Scanner: scanner, Covers: covers, Files: library.NewFileReader()}}
+		Library: Library{Store: lib, Scanner: scanner, Covers: covers, Files: library.NewFileReader(), Uploads: up}}
 	srv := httptest.NewServer(NewHandler(api))
 	t.Cleanup(srv.Close)
-	e := &env{t: t, ctx: ctx, url: srv.URL, db: db, acc: acc, setup: setup, stats: stats, logs: logs, srv: api, dataDir: t.TempDir()}
+	e := &env{t: t, ctx: ctx, url: srv.URL, db: db, acc: acc, setup: setup, stats: stats, logs: logs, srv: api, dataDir: dataDir}
 	e.useConverter(fakeConverter(t))
 	return e
 }

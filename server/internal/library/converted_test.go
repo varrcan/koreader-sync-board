@@ -18,7 +18,7 @@ import (
 func (e *testEnv) managed() string {
 	e.t.Helper()
 	dir := filepath.Join(e.t.TempDir(), "converted")
-	if err := e.st.EnsureManagedRoot(e.ctx, dir); err != nil {
+	if err := e.st.EnsureManagedRoot(e.ctx, ManagedConverted, dir); err != nil {
 		e.t.Fatal(err)
 	}
 	return dir
@@ -112,7 +112,7 @@ func TestManagedRootRelativeDataDir(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(base)
-	if err := e.st.EnsureManagedRoot(e.ctx, filepath.Join("data", "converted")); err != nil {
+	if err := e.st.EnsureManagedRoot(e.ctx, ManagedConverted, filepath.Join("data", "converted")); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.strings(`SELECT path FROM library_roots WHERE managed = 1`); got[0] != filepath.Join(base, "data", "converted") {
@@ -134,7 +134,7 @@ func TestManagedRootFollowsDataDir(t *testing.T) {
 	id, _ := e.convert(old, "a.fb2", "a.epub", "epub", meta.Book{})
 
 	moved := filepath.Join(t.TempDir(), "converted")
-	if err := e.st.EnsureManagedRoot(e.ctx, moved); err != nil {
+	if err := e.st.EnsureManagedRoot(e.ctx, ManagedConverted, moved); err != nil {
 		t.Fatal(err)
 	}
 	if n := e.count(`SELECT count(*) FROM library_roots WHERE managed = 1`); n != 1 {
@@ -153,7 +153,7 @@ func TestManagedRootPathTaken(t *testing.T) {
 	e := newEnv(t)
 	dir := t.TempDir()
 	e.addRoot(dir)
-	if err := e.st.EnsureManagedRoot(e.ctx, dir); err == nil {
+	if err := e.st.EnsureManagedRoot(e.ctx, ManagedConverted, dir); err == nil {
 		t.Fatal("path of a regular root accepted")
 	}
 	if n := e.count(`SELECT count(*) FROM library_roots WHERE managed = 1`); n != 0 {
@@ -296,7 +296,7 @@ func TestDeleteConverted(t *testing.T) {
 	r := e.readers("alice")
 	r.sync("alice", partial, 0.4)
 
-	if _, err := e.st.DeleteConverted(e.ctx, e.fileID("a.fb2")); !errors.Is(err, ErrNotConverted) {
+	if _, err := e.st.DeleteConverted(e.ctx, e.fileID("a.fb2")); !errors.Is(err, ErrReadOnlyFile) {
 		t.Fatalf("regular file: %v", err)
 	}
 	if _, err := e.st.DeleteConverted(e.ctx, 9999); !errors.Is(err, ErrFileNotFound) {

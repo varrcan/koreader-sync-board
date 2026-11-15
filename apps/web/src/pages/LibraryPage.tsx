@@ -6,8 +6,10 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { meQuery } from "@/auth";
 import { BookCover } from "@/components/BookCover";
+import { DropTarget, UploadButton, UploadQueue, useUploadQueue, WebdavBooks } from "@/components/LibraryUpload";
 import { ScanStatus } from "@/components/ScanStatus";
 import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { displayTitle } from "@/lib/books";
@@ -47,6 +49,7 @@ export function LibraryPage() {
   const { q = "" } = useSearch({ from: "/app/library" });
   const navigate = useNavigate({ from: "/library" });
   const isAdmin = me?.role === "admin";
+  const upload = useUploadQueue();
 
   // Поле следует за адресом (назад в браузере), адрес — за полем с задержкой.
   const [text, setText] = useState(q);
@@ -63,7 +66,7 @@ export function LibraryPage() {
 
   const books = useInfiniteQuery({ ...libraryBooksQuery(q), placeholderData: keepPreviousData });
   const items = books.data?.pages.flatMap((p) => p.items) ?? [];
-  const noRoots = summary.data?.roots === 0;
+  const empty = summary.data?.files === 0;
 
   return (
     <>
@@ -80,6 +83,7 @@ export function LibraryPage() {
           )}
         </div>
         <div className="flex flex-wrap gap-2 self-start">
+          <UploadButton onFiles={upload.add} />
           <Button variant="outline" asChild>
             <Link to="/help/opds" hash="setup">
               <BookDown />
@@ -97,7 +101,16 @@ export function LibraryPage() {
         </div>
       </div>
 
-      {!noRoots && (
+      <DropTarget onFiles={upload.add} />
+      <UploadQueue items={upload.items} busy={upload.busy} onClear={upload.clear} />
+      {!empty && (
+        <details className="max-w-5xl rounded-xl border px-4 py-3">
+          <summary className="cursor-pointer text-sm font-medium select-none">{t("library.upload.webdavTitle")}</summary>
+          <WebdavBooks className="mt-3" />
+        </details>
+      )}
+
+      {!empty && (
         <div className="relative max-w-5xl">
           <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -114,10 +127,20 @@ export function LibraryPage() {
 
       {books.isPending && <p className="text-sm text-muted-foreground">{t("common.loading")}</p>}
       {books.isError && <p className="text-sm text-destructive">{t("common.loadError")}</p>}
-      {books.isSuccess && items.length === 0 && (
-        <p className="text-sm text-pretty text-muted-foreground">
-          {noRoots ? t(isAdmin ? "library.emptyAdmin" : "library.emptyUser") : q ? t("library.noResults") : t("library.empty")}
-        </p>
+      {books.isSuccess && items.length === 0 && empty && (
+        <Card className="max-w-3xl gap-4 px-6">
+          <div className="flex flex-col gap-1.5">
+            <h2 className="font-serif text-xl font-medium">{t("library.empty")}</h2>
+            <p className="text-sm text-pretty text-muted-foreground">{t("library.emptyUpload")}</p>
+            <p className="text-sm text-pretty text-muted-foreground">
+              {t(isAdmin ? "library.emptyAdmin" : "library.emptyUser")}
+            </p>
+          </div>
+          <WebdavBooks />
+        </Card>
+      )}
+      {books.isSuccess && items.length === 0 && !empty && (
+        <p className="text-sm text-pretty text-muted-foreground">{q ? t("library.noResults") : t("library.empty")}</p>
       )}
 
       {items.length > 0 && (

@@ -717,6 +717,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/library/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Загрузить книгу
+         * @description Любому пользователю. Тело — содержимое одного файла. Файл сохраняется в корень загрузок;
+         *     если имя занято, перед расширением книги добавляется суффикс ` (2)`, ` (3)` и так далее.
+         *     После загрузки ставится в очередь скан корня загрузок, книга появляется в каталоге
+         *     по его окончании. Ошибки имени и формата отдаются до чтения тела.
+         */
+        post: operations["uploadLibraryFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/library/books": {
         parameters: {
             query?: never;
@@ -873,8 +896,10 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Удалить сконвертированный файл
-         * @description Только администратор и только файл, созданный конвертацией. Прогресс по нему сохраняется.
+         * Удалить загруженный или сконвертированный файл
+         * @description Загруженный файл удаляет любой пользователь, сконвертированный — только администратор.
+         *     Файлы обычных корней не удаляются. Прогресс по файлу сохраняется. Загруженный файл,
+         *     которого уже нет на диске, удаляется из индекса с тем же ответом.
          */
         delete: operations["deleteLibraryFile"];
         options?: never;
@@ -1060,9 +1085,22 @@ export interface components {
             pinned: boolean;
             /** @description Файл создан конвертацией. */
             converted: boolean;
+            /** @description Файл лежит в корне загрузок. */
+            uploaded: boolean;
             /** @description Формат FB2, и результата конвертации этого содержимого нет. */
             convertible: boolean;
             progress: components["schemas"]["LibraryFileProgress"] | null;
+        };
+        LibraryUploadResult: {
+            /** @description Итоговое имя файла в корне загрузок. */
+            name: string;
+        };
+        LibraryUploadConflict: components["schemas"]["Error"] & {
+            /**
+             * Format: int64
+             * @description Книга, в которой уже есть файл с тем же содержимым.
+             */
+            book_id: number;
         };
         LibraryConvertResult: {
             /** Format: int64 */
@@ -2930,6 +2968,75 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    uploadLibraryFile: {
+        parameters: {
+            query: {
+                /** @description Имя файла. Приводится к NFC. */
+                name: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/octet-stream": Blob;
+            };
+        };
+        responses: {
+            /** @description Файл сохранён */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryUploadResult"];
+                };
+            };
+            /**
+             * @description `invalid_name`: имя пустое, длиннее 255 байт, начинается с точки или содержит `/`, `\`,
+             *     управляющие символы; `empty_file`: пустое тело; `bad_request`: тело не дочитано
+             */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["CrossOrigin"];
+            /** @description `file_exists`: файл с тем же содержимым уже есть в библиотеке */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibraryUploadConflict"];
+                };
+            };
+            /** @description `file_too_large`: файл больше 1 GiB */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description `unsupported_format`: расширение не из списка форматов библиотеки */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     listLibraryBooks: {
         parameters: {
             query?: {
@@ -3193,7 +3300,7 @@ export interface operations {
                 content?: never;
             };
             401: components["responses"]["Unauthorized"];
-            /** @description `forbidden` (не администратор) или `cross_origin` */
+            /** @description `forbidden` (сконвертированный файл, не администратор) или `cross_origin` */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -3203,7 +3310,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["LibraryNotFound"];
-            /** @description `not_converted` — файл из обычного корня. */
+            /** @description `file_read_only` — файл из обычного корня. */
             409: {
                 headers: {
                     [name: string]: unknown;

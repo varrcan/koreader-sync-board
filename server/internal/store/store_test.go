@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"testing/fstest"
@@ -219,5 +220,42 @@ func TestMigrateLibraryOverExistingData(t *testing.T) {
 	mustExec(`DELETE FROM library_books`)
 	if err := db.Read.QueryRowContext(ctx, `SELECT count(*) FROM library_book_keys`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("keys after book delete: %d, %v", n, err)
+	}
+}
+
+// TestMigrateManagedRootKinds: 0012 сохраняет корень конвертаций и допускает по
+// одному служебному корню каждого вида.
+func TestMigrateManagedRootKinds(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, filepath.Join(t.TempDir(), FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mustExec := func(q string) {
+		t.Helper()
+		if _, err := db.Write.ExecContext(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustExec(`DROP INDEX library_roots_managed`)
+	mustExec(`CREATE UNIQUE INDEX library_roots_managed ON library_roots (managed) WHERE managed = 1`)
+	mustExec(`DELETE FROM schema_migrations WHERE version = 12`)
+	mustExec(`INSERT INTO library_roots (name, path, created_at, managed) VALUES ('converted', '/data/converted', 0, 1)`)
+
+	if err := Migrate(ctx, db.Write); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(`INSERT INTO library_roots (name, path, created_at, managed) VALUES ('uploads', '/data/uploads', 0, 2)`)
+	mustExec(`INSERT INTO library_roots (name, path, created_at) VALUES ('a', '/a', 0), ('b', '/b', 0)`)
+	for _, kind := range []int{1, 2} {
+		if _, err := db.Write.ExecContext(ctx, `INSERT INTO library_roots (name, path, created_at, managed) VALUES ('x', ?, 0, ?)`,
+			fmt.Sprintf("/x%d", kind), kind); err == nil {
+			t.Errorf("second managed root of kind %d accepted", kind)
+		}
+	}
+	var n int
+	if err := db.Read.QueryRowContext(ctx, `SELECT count(*) FROM library_roots`).Scan(&n); err != nil || n != 4 {
+		t.Fatalf("roots: %d, %v", n, err)
 	}
 }

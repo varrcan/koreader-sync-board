@@ -10,11 +10,13 @@ import (
 	"unicode/utf8"
 
 	"github.com/varrcan/koreader-sync-board/server/internal/accounts"
+	"github.com/varrcan/koreader-sync-board/server/internal/hashing"
 	"github.com/varrcan/koreader-sync-board/server/internal/library"
 	"github.com/varrcan/koreader-sync-board/server/internal/library/convert"
 	"github.com/varrcan/koreader-sync-board/server/internal/library/lookup"
 	"github.com/varrcan/koreader-sync-board/server/internal/library/meta"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
+	"github.com/varrcan/koreader-sync-board/server/internal/uploads"
 )
 
 const (
@@ -25,6 +27,9 @@ const (
 	downloadTimeout = 30 * time.Minute
 	// convertResponseTimeout заменяет общий срок записи: ответ ждёт конвертацию.
 	convertResponseTimeout = convert.Timeout + time.Minute
+	// uploadResponseTimeout — срок записи ответа на загрузку, отсчитывается после чтения
+	// тела: общий срок сервера к этому времени мог давно истечь.
+	uploadResponseTimeout = 30 * time.Second
 )
 
 // contentTypes — Content-Type файла по формату индекса.
@@ -48,6 +53,7 @@ type Library struct {
 	Lookup      MetadataLookup
 	CoverSource CoverSource
 	Converter   *convert.Service
+	Uploads     *uploads.Dir
 }
 
 // MetadataLookup ищет кандидатов во внешних каталогах.
@@ -255,11 +261,126 @@ func (s *Server) ConvertLibraryFile(w http.ResponseWriter, r *http.Request, id L
 	}
 }
 
-// DeleteLibraryFile удаляет результат конвертации. Запрос ждёт идущую конвертацию.
-func (s *Server) DeleteLibraryFile(w http.ResponseWriter, r *http.Request, id LibraryFileID) {
-	if !requireAdmin(w, r) {
+// UploadLibraryFile сохраняет книгу в корень загрузок. Файл индексирует скан загрузок,
+// а не обработчик: прямая запись гонялась бы со сканом того же корня.
+func (s *Server) UploadLibraryFile(w http.ResponseWriter, r *http.Request, params UploadLibraryFileParams) {
+	name, err := uploads.ValidName(params.Name)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_name", "invalid file name")
 		return
 	}
+	format, ok := library.FormatOf(name)
+	if !ok {
+		writeError(w, http.StatusUnsupportedMediaType, "unsupported_format", "unsupported book format")
+		return
+	}
+	if r.ContentLength > uploads.MaxSize {
+		writeError(w, http.StatusRequestEntityTooLarge, "file_too_large", "file is larger than 1 GiB")
+		return
+	}
+	dir := s.Library.Uploads
+	tmp, size, err := dir.Receive(".", uploads.Body(w, r), uploads.MaxSize)
+	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(uploadResponseTimeout))
+	var readErr uploads.ReadError
+	switch {
+	case errors.Is(err, uploads.ErrTooLarge):
+		writeError(w, http.StatusRequestEntityTooLarge, "file_too_large", "file is larger than 1 GiB")
+		return
+	case errors.As(err, &readErr):
+		writeError(w, http.StatusBadRequest, "bad_request", "cannot read request body")
+		return
+	case err != nil:
+		s.internal(w, "receive upload", err)
+		return
+	}
+	if size == 0 {
+		_ = dir.Remove(tmp)
+		writeError(w, http.StatusBadRequest, "empty_file", "file is empty")
+		return
+	}
+	// Файл, загруженный, но ещё не проиндексированный, проверку проходит: повтор в это
+	// окно сохранится с суффиксом.
+	sum, err := hashing.PartialMD5(filepath.Join(dir.Path(), filepath.FromSlash(tmp)))
+	var book int64
+	if err == nil {
+		book, err = s.Library.Store.BookByHash(r.Context(), sum)
+	}
+	if err != nil || book != 0 {
+		_ = dir.Remove(tmp)
+	}
+	switch {
+	case err != nil:
+		s.internal(w, "check upload duplicate", err)
+		return
+	case book != 0:
+		writeJSON(w, http.StatusConflict, LibraryUploadConflict{
+			Code: "file_exists", Message: "the library already has this file", BookId: book,
+		})
+		return
+	}
+	placed, err := dir.Place(tmp, name, format)
+	if err != nil {
+		s.internal(w, "place upload", err)
+		return
+	}
+	cur, _ := panelauth.FromContext(r.Context())
+	s.Log.Info("panel: book uploaded", "user", cur.User.Username, "name", placed, "size", size)
+	s.Library.Scanner.TriggerUploads()
+	writeJSON(w, http.StatusCreated, LibraryUploadResult{Name: placed})
+}
+
+// DeleteLibraryFile удаляет загруженный файл (любой пользователь) или результат
+// конвертации (только администратор). Файлы обычных корней не удаляются.
+func (s *Server) DeleteLibraryFile(w http.ResponseWriter, r *http.Request, id LibraryFileID) {
+	kind, err := s.Library.Store.FileKind(r.Context(), id)
+	switch {
+	case errors.Is(err, library.ErrFileNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "file not found")
+		return
+	case err != nil:
+		s.internal(w, "delete library file", err)
+		return
+	}
+	switch kind {
+	case library.ManagedUploads:
+		s.deleteUploaded(w, r, id)
+	case library.ManagedConverted:
+		if requireAdmin(w, r) {
+			s.deleteConverted(w, r, id)
+		}
+	default:
+		writeError(w, http.StatusConflict, "file_read_only", "files of library roots are read-only")
+	}
+}
+
+// deleteUploaded убирает файл из индекса, затем с диска. Скан загрузок ставится и
+// здесь: идущий скан мог запомнить файл до удаления и вернуть его строку в индекс.
+func (s *Server) deleteUploaded(w http.ResponseWriter, r *http.Request, id int64) {
+	path, err := s.Library.Store.DeleteUploaded(r.Context(), id)
+	switch {
+	case errors.Is(err, library.ErrFileNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "file not found")
+		return
+	case errors.Is(err, library.ErrReadOnlyFile):
+		writeError(w, http.StatusConflict, "file_read_only", "files of library roots are read-only")
+		return
+	case err != nil:
+		s.internal(w, "delete uploaded file", err)
+		return
+	}
+	err = s.Library.Uploads.Remove(path)
+	s.Library.Scanner.TriggerUploads()
+	if err != nil {
+		s.internal(w, "remove uploaded file", err)
+		return
+	}
+	cur, _ := panelauth.FromContext(r.Context())
+	s.Log.Info("panel: uploaded file deleted", "user", cur.User.Username, "path", path)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// deleteConverted удаляет результат конвертации. Запрос ждёт идущую конвертацию.
+func (s *Server) deleteConverted(w http.ResponseWriter, r *http.Request, id int64) {
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(convertResponseTimeout))
 	err := s.Library.Converter.Delete(r.Context(), id)
 	switch {
@@ -268,8 +389,8 @@ func (s *Server) DeleteLibraryFile(w http.ResponseWriter, r *http.Request, id Li
 	case r.Context().Err() != nil:
 	case errors.Is(err, library.ErrFileNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "file not found")
-	case errors.Is(err, library.ErrNotConverted):
-		writeError(w, http.StatusConflict, "not_converted", "file is not a conversion result")
+	case errors.Is(err, library.ErrReadOnlyFile):
+		writeError(w, http.StatusConflict, "file_read_only", "files of library roots are read-only")
 	default:
 		s.internal(w, "delete library file", err)
 	}
@@ -387,7 +508,8 @@ func libraryBook(b library.Book) LibraryBook {
 func libraryFile(f library.File) LibraryFile {
 	out := LibraryFile{
 		Id: f.ID, RootName: f.RootName, Path: f.Path, Format: f.Format, Size: f.Size,
-		Title: f.Title, Authors: f.Authors, Pinned: f.Pinned, Converted: f.Converted, Convertible: f.Convertible,
+		Title: f.Title, Authors: f.Authors, Pinned: f.Pinned, Converted: f.Converted, Uploaded: f.Uploaded,
+		Convertible: f.Convertible,
 	}
 	if p := f.Progress; p != nil {
 		out.Progress = &LibraryFileProgress{

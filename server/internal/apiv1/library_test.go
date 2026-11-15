@@ -385,7 +385,7 @@ func TestLibraryDownloadConverted(t *testing.T) {
 
 	st := library.NewStore(e.db)
 	managed := filepath.Join(t.TempDir(), "converted")
-	if err := st.EnsureManagedRoot(e.ctx, managed); err != nil {
+	if err := st.EnsureManagedRoot(e.ctx, library.ManagedConverted, managed); err != nil {
 		t.Fatal(err)
 	}
 	const name = "Пикник.epub"

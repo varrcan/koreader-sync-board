@@ -20,8 +20,8 @@ import (
 // (.azw3 KOReader не регистрирует). txt, html и doc в каталогах книг чаще мусор.
 var formats = []string{"fb2.zip", "epub", "fb2", "pdf", "djvu", "mobi", "azw", "cbz"}
 
-// formatOf возвращает формат файла по имени без учёта регистра.
-func formatOf(name string) (string, bool) {
+// FormatOf возвращает формат файла по имени без учёта регистра.
+func FormatOf(name string) (string, bool) {
 	lower := strings.ToLower(name)
 	for _, f := range formats {
 		if strings.HasSuffix(lower, "."+f) {
@@ -41,13 +41,14 @@ type Summary struct {
 	FinishedAt          *time.Time // конец последнего завершённого скана корня
 }
 
-// Scanner обходит корни в фоне: периодически, по Trigger и сразу после старта.
-// Одновременно идёт не больше одного скана.
+// Scanner обходит корни в фоне: периодически, по Trigger и сразу после старта, а
+// корень загрузок — ещё и по TriggerUploads. Одновременно идёт не больше одного скана.
 type Scanner struct {
 	store    *Store
 	log      *slog.Logger
 	interval time.Duration
-	trigger  chan struct{}
+	trigger  chan struct{} // полный скан
+	uploads  chan struct{} // скан корня загрузок
 
 	mu        sync.Mutex
 	active    bool // скан идёт
@@ -83,7 +84,7 @@ func WithCovers(c *Covers) Option {
 // NewScanner создаёт сканер. interval = 0 — скан только по Trigger.
 func NewScanner(st *Store, interval time.Duration, log *slog.Logger, opts ...Option) *Scanner {
 	s := &Scanner{
-		store: st, log: log, interval: interval, trigger: make(chan struct{}, 1),
+		store: st, log: log, interval: interval, trigger: make(chan struct{}, 1), uploads: make(chan struct{}, 1),
 		walk: filepath.WalkDir, hash: hashing.PartialMD5, parse: meta.Parse, open: os.OpenInRoot,
 	}
 	for _, o := range opts {
@@ -94,12 +95,18 @@ func NewScanner(st *Store, interval time.Duration, log *slog.Logger, opts ...Opt
 
 // Trigger ставит скан в очередь, не блокируясь. Сколько бы раз его ни вызвали во
 // время скана, после него выполнится ровно один повторный.
-func (s *Scanner) Trigger() {
+func (s *Scanner) Trigger() { s.enqueue(s.trigger) }
+
+// TriggerUploads ставит в очередь скан одного корня загрузок с теми же правилами
+// слияния. Полный скан включает загрузки и поглощает его.
+func (s *Scanner) TriggerUploads() { s.enqueue(s.uploads) }
+
+func (s *Scanner) enqueue(ch chan struct{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.queued = true
 	select {
-	case s.trigger <- struct{}{}:
+	case ch <- struct{}{}:
 	default:
 	}
 }
@@ -125,7 +132,8 @@ func (s *Scanner) Summary(ctx context.Context) (Summary, error) {
 	return sum, nil
 }
 
-// Run сканирует до отмены ctx: сразу и по таймеру, если interval > 0, и по Trigger.
+// Run сканирует до отмены ctx: сразу и по таймеру, если interval > 0, и по Trigger;
+// корень загрузок — по TriggerUploads.
 func (s *Scanner) Run(ctx context.Context) {
 	var tick <-chan time.Time
 	if s.interval > 0 {
@@ -135,16 +143,36 @@ func (s *Scanner) Run(ctx context.Context) {
 		s.Trigger()
 	}
 	for {
+		full := true
 		select {
 		case <-ctx.Done():
 			return
 		case <-s.trigger:
 		case <-tick:
+		case <-s.uploads:
+			full = false
 		}
+		// select из двух готовых каналов выбирает случайный, поэтому поглощение — в обе
+		// стороны: полный скан в очереди выполняется вместо скана загрузок, а запрос
+		// скана загрузок учитывается полным. Под mu, чтобы триггер, пришедший после
+		// select, не потерял queued.
 		s.mu.Lock()
+		select {
+		case <-s.trigger:
+			full = true
+		default:
+		}
+		select {
+		case <-s.uploads:
+		default:
+		}
 		s.queued, s.active, s.startedAt = false, true, time.Now()
 		s.mu.Unlock()
-		s.scanAll(ctx)
+		if full {
+			s.scanAll(ctx)
+		} else {
+			s.scanUploads(ctx)
+		}
 		s.mu.Lock()
 		s.active = false
 		s.mu.Unlock()
@@ -153,7 +181,7 @@ func (s *Scanner) Run(ctx context.Context) {
 
 // scanAll сканирует корни последовательно в порядке id.
 func (s *Scanner) scanAll(ctx context.Context) {
-	roots, err := s.store.Roots(ctx)
+	roots, err := s.store.scanRoots(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
 			s.log.Warn("library: scan failed", "error", err)
@@ -167,14 +195,33 @@ func (s *Scanner) scanAll(ctx context.Context) {
 		s.scanRoot(ctx, r)
 	}
 	if ctx.Err() == nil {
-		s.extractCovers(ctx)
+		s.extractCovers(ctx, 0)
+	}
+}
+
+// scanUploads сканирует только корень загрузок: новая книга видна быстро, без обхода
+// корней на NAS.
+func (s *Scanner) scanUploads(ctx context.Context) {
+	root, err := s.store.uploadsRoot(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Warn("library: uploads scan failed", "error", err)
+		}
+		return
+	}
+	s.scanRoot(ctx, root)
+	if ctx.Err() == nil {
+		s.extractCovers(ctx, root.ID)
 	}
 }
 
 // extractCovers читает обложки файлов, которые ещё не проверены: новых, изменённых
 // и проиндексированных до появления обложек. Идёт после обхода корней, чтобы
 // чтение FB2 целиком не задерживало названия и хеши; scan.running остаётся true.
-func (s *Scanner) extractCovers(ctx context.Context) {
+// rootID != 0 — только файлы этого корня и без уборки каталога: скан загрузок не
+// должен открывать файлы отключённого NAS (на hard-mount NFS он бы повис), а
+// осиротевших миниатюр после него не бывает.
+func (s *Scanner) extractCovers(ctx context.Context, rootID int64) {
 	if s.covers == nil {
 		return
 	}
@@ -189,7 +236,7 @@ func (s *Scanner) extractCovers(ctx context.Context) {
 		}
 	}
 	for {
-		files, err := s.store.uncheckedCovers(ctx, after, batchSize)
+		files, err := s.store.uncheckedCovers(ctx, rootID, after, batchSize)
 		if err != nil {
 			warn("library: covers failed", err)
 			return
@@ -233,9 +280,11 @@ func (s *Scanner) extractCovers(ctx context.Context) {
 			}
 		}
 	}
-	used := func() (map[string]bool, error) { return s.store.usedCovers(ctx) }
-	if err := s.covers.sweep(used); err != nil {
-		warn("library: covers cleanup failed", err)
+	if rootID == 0 {
+		used := func() (map[string]bool, error) { return s.store.usedCovers(ctx) }
+		if err := s.covers.sweep(used); err != nil {
+			warn("library: covers cleanup failed", err)
+		}
 	}
 	s.log.Info("library: covers finished", "checked", checked, "found", found, "retry", retry,
 		"duration", time.Since(start).Round(time.Millisecond))
@@ -334,8 +383,9 @@ func (rs *rootScan) run(ctx context.Context) error {
 		return err
 	}
 	// Пустая точка монтирования неотключённого NAS читается без ошибок: без этой
-	// проверки скан стёр бы индекс вместе с ключами слияний.
-	if rs.found == 0 && len(rs.known) > 0 {
+	// проверки скан стёр бы индекс вместе с ключами слияний. Каталог загрузок
+	// принадлежит серверу: в нём пустота — это удалённый последний файл.
+	if rs.found == 0 && len(rs.known) > 0 && rs.root.Managed != ManagedUploads {
 		return errors.New("root is empty: not mounted? Delete the root to clear its index")
 	}
 	if err := rs.flush(ctx); err != nil {
@@ -394,14 +444,19 @@ func (rs *rootScan) visit(ctx context.Context) fs.WalkDirFunc {
 		if !d.Type().IsRegular() {
 			return nil
 		}
-		format, ok := formatOf(name)
+		format, ok := FormatOf(name)
 		if !ok {
 			return nil
 		}
 		rel := rs.rel(path)
+		info, err := d.Info()
+		if err == nil && info.Size() == 0 {
+			// Так выглядит файл, который WebDAV-клиент создал до записи содержимого
+			// (LOCK, нулевой PUT Windows). Проиндексированный раньше файл уходит из индекса.
+			return nil
+		}
 		rs.found++
 		rs.seen[rel] = true
-		info, err := d.Info()
 		if err != nil {
 			rs.errs = append(rs.errs, err.Error())
 			return nil

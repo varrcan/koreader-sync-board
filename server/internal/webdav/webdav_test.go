@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
 	"github.com/varrcan/koreader-sync-board/server/internal/statistics/statstest"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
+	"github.com/varrcan/koreader-sync-board/server/internal/uploads"
 )
 
 // propfindBody — тело PROPFIND из WebDavApi.listFolder (providers/webdav.lua).
@@ -53,6 +55,9 @@ type env struct {
 	h     *Handler
 	pass  map[string]string // "user/device" → пароль
 	logs  *logBuffer
+	// books — каталог диска книг, changed — сколько раз он поменялся.
+	books   string
+	changed atomic.Int32
 }
 
 func newEnv(t *testing.T) *env {
@@ -67,8 +72,13 @@ func newEnv(t *testing.T) *env {
 	log := slog.New(slog.NewJSONHandler(logs, nil))
 	acc := accounts.New(db, accounts.WithArgon2Params(accounts.TestArgon2Params), accounts.WithLimiter(ratelimit.New(log)))
 	stats := statistics.New(db, t.TempDir(), log)
-	e := &env{t: t, ctx: ctx, db: db, acc: acc, stats: stats, h: New(acc, stats, clientip.New(nil), log),
-		pass: map[string]string{}, logs: logs}
+	e := &env{t: t, ctx: ctx, db: db, acc: acc, stats: stats, pass: map[string]string{}, logs: logs, books: t.TempDir()}
+	dir, err := uploads.Open(e.books)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { dir.Close() })
+	e.h = New(acc, stats, &Books{Dir: dir, Changed: func() { e.changed.Add(1) }}, clientip.New(nil), log)
 	for _, u := range []string{"alice", "bob"} {
 		if _, err := acc.CreateUser(ctx, u, accounts.RoleUser); err != nil {
 			t.Fatal(err)
@@ -208,7 +218,8 @@ func TestPropfind(t *testing.T) {
 		return listFolder(t, w.Body.String())
 	}
 
-	if got := propfind("/dav/", "1"); len(got) != 1 || !got[0].folder || got[0].href != "/dav/" {
+	if got := propfind("/dav/", "1"); len(got) != 2 || !got[0].folder || got[0].href != "/dav/" ||
+		!got[1].folder || got[1].href != "/dav/books/" {
 		t.Fatalf("empty folder: %+v", got)
 	}
 	data := stats(t, "A")
@@ -217,10 +228,10 @@ func TestPropfind(t *testing.T) {
 
 	for _, depth := range []string{"1", "infinity", ""} {
 		got := propfind("/dav/", depth)
-		if len(got) != 2 || !got[0].folder || got[1].folder {
+		if len(got) != 3 || !got[0].folder || !got[1].folder || got[2].folder {
 			t.Fatalf("depth %q: %+v", depth, got)
 		}
-		f := got[1]
+		f := got[2]
 		if f.href != "/dav/statistics.sqlite3" || f.size != strconv.Itoa(len(data)) || f.etag != put.Header().Get("ETag") {
 			t.Errorf("depth %q: file %+v", depth, f)
 		}
@@ -231,7 +242,8 @@ func TestPropfind(t *testing.T) {
 	if got := propfind("/dav/", "0"); len(got) != 1 || !got[0].folder {
 		t.Fatalf("depth 0: %+v", got)
 	}
-	if got := propfind("/dav", "1"); len(got) != 2 || got[0].href != "/dav" || got[1].href != "/dav/statistics.sqlite3" {
+	if got := propfind("/dav", "1"); len(got) != 3 || got[0].href != "/dav" || got[1].href != "/dav/books/" ||
+		got[2].href != "/dav/statistics.sqlite3" {
 		t.Fatalf("without slash: %+v", got)
 	}
 	if got := propfind("/dav/statistics.sqlite3", "0"); len(got) != 1 || got[0].folder || got[0].size != strconv.Itoa(len(data)) {
@@ -242,7 +254,7 @@ func TestPropfind(t *testing.T) {
 	}
 	// Файлы bob — в его пространстве.
 	w := e.do(req{method: "PROPFIND", path: "/dav/", as: "bob/Kobo", headers: map[string]string{"Depth": "1"}})
-	if got := listFolder(t, w.Body.String()); len(got) != 1 {
+	if got := listFolder(t, w.Body.String()); len(got) != 2 {
 		t.Fatalf("bob sees %+v", got)
 	}
 }

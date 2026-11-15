@@ -1,10 +1,13 @@
 import type {
+  ApiError,
   LibraryBookDetail,
   LibraryBookPage,
   LibraryMetadataCandidates,
   LibraryMetadataForm,
   LibraryRoot,
   LibrarySummary,
+  LibraryUploadConflict,
+  LibraryUploadResult,
 } from "@ksb/api-client";
 import {
   infiniteQueryOptions,
@@ -14,8 +17,8 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
-import { api, ApiFailure, failure } from "./api";
+import { useCallback, useEffect, useRef } from "react";
+import { api, ApiFailure, failure, sessionLost } from "./api";
 import { errorText } from "./auth";
 
 // Пока идёт скан, сводка и корни опрашиваются: число файлов и ошибки меняются.
@@ -81,6 +84,29 @@ function invalidateProgress(client: QueryClient) {
   void client.invalidateQueries({ queryKey: ["books"] });
   void client.invalidateQueries({ queryKey: ["book"] });
   void client.invalidateQueries({ queryKey: ["activity"] });
+}
+
+/**
+ * После загрузок ждёт конца скана загрузок и обновляет каталог. Скан маленькой папки
+ * успевает закончиться до запроса сводки, и useLibrarySummary его конец не увидит,
+ * поэтому ждётся сводка, полученная позже вызова, без идущего скана.
+ */
+export function useRefreshAfterScan() {
+  const client = useQueryClient();
+  const summary = useQuery(librarySummaryQuery);
+  const since = useRef<number | null>(null);
+  const { dataUpdatedAt } = summary;
+  const running = summary.data?.scan.running;
+  useEffect(() => {
+    if (since.current === null || dataUpdatedAt < since.current || running !== false) return;
+    since.current = null;
+    void client.invalidateQueries({ queryKey: ["library", "books"] });
+    invalidateProgress(client);
+  }, [client, dataUpdatedAt, running]);
+  return useCallback(() => {
+    since.current = Date.now();
+    void client.invalidateQueries({ queryKey: librarySummaryQuery.queryKey, exact: true });
+  }, [client]);
 }
 
 /** Сводка библиотеки; по окончании скана обновляет корни, каталог и названия книг прогресса. */
@@ -195,7 +221,8 @@ export function useConvertFile() {
   });
 }
 
-export function useDeleteConverted() {
+/** Удаляет загруженный или сконвертированный файл. */
+export function useDeleteFile() {
   const client = useQueryClient();
   return useMutation({
     mutationFn: async (id: number): Promise<void> => {
@@ -281,6 +308,65 @@ export async function downloadFile(id: number): Promise<boolean> {
   return true;
 }
 
+/** Предел размера загружаемого файла — 1 ГиБ, как на сервере. */
+export const maxUploadSize = 1 << 30;
+
+// Тот же список, что у сканера; fb2.zip проверяется раньше zip-подобных.
+const bookFormats = ["fb2.zip", "epub", "fb2", "pdf", "djvu", "mobi", "azw", "cbz"];
+
+/** Значение accept для выбора файлов. */
+export const uploadAccept = bookFormats.map((f) => `.${f.split(".").pop()}`).join(",");
+
+/**
+ * Код ошибки, которую сервер вернул бы файлу, или undefined. Проверяется до отправки:
+ * сервер отвечает на большое тело, не дочитав его, и XHR видит обрыв, а не код.
+ */
+export function uploadProblem(file: File): string | undefined {
+  const name = file.name.toLowerCase();
+  if (file.name.startsWith(".")) return "invalid_name";
+  if (!bookFormats.some((f) => name.endsWith(`.${f}`))) return "unsupported_format";
+  if (file.size === 0) return "empty_file";
+  if (file.size > maxUploadSize) return "file_too_large";
+  return undefined;
+}
+
+/** Ошибка загрузки; bookId — книга с тем же содержимым при file_exists. */
+export class UploadFailure extends ApiFailure {
+  readonly bookId?: number;
+
+  constructor(code: string, bookId?: number) {
+    super(code);
+    this.bookId = bookId;
+  }
+}
+
+/**
+ * Загружает файл книги. XMLHttpRequest, а не клиент API: у fetch нет прогресса выгрузки.
+ * onProgress получает долю от 0 до 1.
+ */
+export function uploadBook(file: File, onProgress: (fraction: number) => void): Promise<LibraryUploadResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/v1/library/uploads?name=${encodeURIComponent(file.name)}`);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.responseType = "json";
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status === 201) {
+        resolve(xhr.response as LibraryUploadResult);
+        return;
+      }
+      if (xhr.status === 401) sessionLost();
+      const body = xhr.response as (ApiError & Partial<LibraryUploadConflict>) | null;
+      reject(new UploadFailure(body?.code ?? "unknown", body?.book_id));
+    };
+    xhr.onerror = () => reject(new UploadFailure("unknown"));
+    xhr.send(file);
+  });
+}
+
 type TFunction = Parameters<typeof errorText>[0];
 
 const providerNames: Record<string, string> = {
@@ -297,6 +383,12 @@ export function providerName(t: TFunction, id: string): string {
 /** Внешний источник правки; файл и ручная правка подписи не имеют. */
 export function externalSource(source: string | null | undefined): string | undefined {
   return source ? providerNames[source] : undefined;
+}
+
+/** Текст ошибки загрузки: предел размера у загрузки свой. */
+export function uploadErrorText(t: TFunction, err: unknown): string {
+  if (err instanceof ApiFailure && err.code === "file_too_large") return t("library.upload.tooLarge");
+  return libraryErrorText(t, err);
 }
 
 /** errorText, где not_found — про библиотеку: общий текст говорит об устройстве. */

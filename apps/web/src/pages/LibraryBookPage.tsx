@@ -40,7 +40,7 @@ import {
   libraryBooksQuery,
   libraryErrorText,
   useConvertFile,
-  useDeleteConverted,
+  useDeleteFile,
   useMergeBooks,
   useSplitFile,
 } from "@/library";
@@ -210,6 +210,10 @@ function FileRow({
           <>
             <span className="font-sans">{t("library.detail.converted")}</span> · {file.path.split("/").pop()}
           </>
+        ) : file.uploaded ? (
+          <>
+            <span className="font-sans">{t("library.detail.uploaded")}</span> · {file.path}
+          </>
         ) : (
           <>
             {file.root_name} / {file.path}
@@ -245,15 +249,19 @@ function FileRow({
   );
 }
 
-function DeleteConvertedDialog({ file, onClose }: { file: LibraryFile; onClose: () => void }) {
+/** last — единственный файл книги: книга исчезнет вместе с ним, и панель уходит в каталог. */
+function DeleteFileDialog({ file, last, onClose }: { file: LibraryFile; last: boolean; onClose: () => void }) {
   const { t } = useTranslation();
-  const remove = useDeleteConverted();
+  const navigate = useNavigate();
+  const remove = useDeleteFile();
   return (
     <AlertDialog open onOpenChange={(open) => !open && onClose()}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t("library.detail.deleteTitle", { name: file.path.split("/").pop() })}</AlertDialogTitle>
-          <AlertDialogDescription>{t("library.detail.deleteDescription")}</AlertDialogDescription>
+          <AlertDialogDescription>
+            {t(file.uploaded ? "library.detail.deleteUploadedDescription" : "library.detail.deleteDescription")}
+          </AlertDialogDescription>
         </AlertDialogHeader>
         <FormError message={remove.isError ? libraryErrorText(t, remove.error) : undefined} />
         <AlertDialogFooter>
@@ -262,7 +270,9 @@ function DeleteConvertedDialog({ file, onClose }: { file: LibraryFile; onClose: 
             disabled={remove.isPending}
             onClick={(e) => {
               e.preventDefault();
-              remove.mutate(file.id, { onSuccess: onClose });
+              remove.mutate(file.id, {
+                onSuccess: () => (last ? void navigate({ to: "/library" }) : onClose()),
+              });
             }}
           >
             {t("library.detail.deleteConfirm")}
@@ -361,14 +371,16 @@ function BookView({ id }: { id: number }) {
               }
               converting={convert.isPending && convert.variables === f.id}
               onConvert={() => convert.mutate(f.id)}
-              canDelete={isAdmin && f.converted}
+              canDelete={f.uploaded || (isAdmin && f.converted)}
               onDelete={() => setDeleting(f)}
             />
           ))}
         </ul>
       </section>
       {merging && <MergeDialog book={book} onClose={() => setMerging(false)} />}
-      {deleting && <DeleteConvertedDialog file={deleting} onClose={() => setDeleting(null)} />}
+      {deleting && (
+        <DeleteFileDialog file={deleting} last={files.length === 1} onClose={() => setDeleting(null)} />
+      )}
       {editing && <MetadataDialog detail={detail.data} onClose={() => setEditing(false)} />}
     </>
   );

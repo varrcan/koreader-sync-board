@@ -32,6 +32,11 @@ export function setUnauthorizedHandler(handler: () => void) {
   onUnauthorized = handler;
 }
 
+/** Сообщает о потере сессии из запроса в обход клиента API (XMLHttpRequest). */
+export function sessionLost() {
+  onUnauthorized();
+}
+
 const sessionMiddleware: Middleware = {
   onResponse({ response, schemaPath }) {
     if (response.status === 401 && !ownUnauthorized.has(schemaPath)) onUnauthorized();

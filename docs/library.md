@@ -3,6 +3,7 @@
 English | [Русский](ru/library.md)
 
 - [Folders](#folders)
+- [Uploading books](#uploading-books)
 - [Book metadata](#book-metadata)
 - [FB2 to EPUB](#fb2-to-epub)
 - [OPDS catalog](#opds-catalog)
@@ -49,6 +50,35 @@ and directories.
   purpose, delete the folder in the panel.
 - **NFS**: mount with `soft` and a `timeo`: on a hard mount a dead server blocks the scan until
   it comes back, and other folders are not scanned meanwhile.
+
+## Uploading books
+
+Books can be added without access to the server: upload them in the panel or put them into the
+WebDAV folder. Uploaded files are kept in `uploads/` inside the data directory and are indexed
+like files of any folder: hashes, metadata, grouping, covers. Any user can upload books and delete
+uploaded files: the library is shared.
+
+- **In the panel**: the **Upload books** button on the **Library** screen, or drop files onto the
+  page. Files go one at a time. Unsupported formats, empty files and files larger than 1 GiB are
+  rejected. If the library already has a file with the same content (the same partial MD5), the
+  new one is not saved and the panel links to that book. If the name is taken, ` (2)` is added.
+- **Over WebDAV**: address `https://<host>/dav/books/`, your username and a **device password**,
+  as for statistics. Subfolders, renaming and deleting work; a book put into the folder shows up
+  in the library within seconds. Tested with `rclone` and GNOME Files (gvfs); Finder and Windows
+  Explorer have not been tested. Windows only mounts WebDAV with a password over HTTPS by
+  default. An rclone example:
+
+  ```sh
+  rclone copy ~/Books ":webdav,url='https://read.example.org/dav/books',vendor=other,user=alice,pass=$(rclone obscure <device password>):"
+  ```
+
+  Anything can be stored in the folder, but only book files get into the library. Duplicates are
+  not checked over WebDAV.
+- **Deleting**: **Delete** next to an uploaded file on the book page removes it from the library
+  and from disk. Reading progress is kept. Files of server folders cannot be deleted from the
+  panel.
+- **Proxy**: request bodies go up to 1 GiB, raise the reverse proxy limit (see
+  [security](security.md)).
 
 ## Book metadata
 

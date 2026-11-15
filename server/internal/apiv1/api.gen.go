@@ -483,6 +483,9 @@ type LibraryFile struct {
 	RootName string               `json:"root_name"`
 	Size     int64                `json:"size"`
 	Title    *string              `json:"title"`
+
+	// Uploaded Файл лежит в корне загрузок.
+	Uploaded bool `json:"uploaded"`
 }
 
 // LibraryFileProgress Последнее по времени состояние прогресса владельца сессии по любому из хешей файла.
@@ -598,6 +601,26 @@ type LibrarySummary struct {
 	Files int         `json:"files"`
 	Roots int         `json:"roots"`
 	Scan  LibraryScan `json:"scan"`
+}
+
+// LibraryUploadConflict defines model for LibraryUploadConflict.
+type LibraryUploadConflict struct {
+	// BookId Книга, в которой уже есть файл с тем же содержимым.
+	BookId int64 `json:"book_id"`
+
+	// Code Машинно-читаемый код ошибки, например `not_found`.
+	//
+	// Example: not_found
+	Code string `json:"code"`
+
+	// Message Описание для разработчика; пользователю показывается перевод по `code`.
+	Message string `json:"message"`
+}
+
+// LibraryUploadResult defines model for LibraryUploadResult.
+type LibraryUploadResult struct {
+	// Name Итоговое имя файла в корне загрузок.
+	Name string `json:"name"`
 }
 
 // LoginRequest defines model for LoginRequest.
@@ -993,6 +1016,12 @@ type GetLibraryBookMetadataCandidatesParams struct {
 	Isbn *string `form:"isbn,omitempty" json:"isbn,omitempty"`
 }
 
+// UploadLibraryFileParams defines parameters for UploadLibraryFile.
+type UploadLibraryFileParams struct {
+	// Name Имя файла. Приводится к NFC.
+	Name string `form:"name" json:"name"`
+}
+
 // GetStatisticsCalendarParams defines parameters for GetStatisticsCalendar.
 type GetStatisticsCalendarParams struct {
 	// Tz Часовой пояс IANA (`Europe/Moscow`, `UTC`), по которому считаются дни и часы.
@@ -1123,7 +1152,7 @@ type ServerInterface interface {
 	// GetLibraryCover Миниатюра обложки
 	// (GET /api/v1/library/covers/{cover})
 	GetLibraryCover(w http.ResponseWriter, r *http.Request, cover string)
-	// DeleteLibraryFile Удалить сконвертированный файл
+	// DeleteLibraryFile Удалить загруженный или сконвертированный файл
 	// (DELETE /api/v1/library/files/{id})
 	DeleteLibraryFile(w http.ResponseWriter, r *http.Request, id LibraryFileID)
 	// GetLibraryFileContent Скачать файл
@@ -1147,6 +1176,9 @@ type ServerInterface interface {
 	// ScanLibrary Сканировать библиотеку
 	// (POST /api/v1/library/scan)
 	ScanLibrary(w http.ResponseWriter, r *http.Request)
+	// UploadLibraryFile Загрузить книгу
+	// (POST /api/v1/library/uploads)
+	UploadLibraryFile(w http.ResponseWriter, r *http.Request, params UploadLibraryFileParams)
 	// GetMe Текущий пользователь
 	// (GET /api/v1/me)
 	GetMe(w http.ResponseWriter, r *http.Request)
@@ -2095,6 +2127,39 @@ func (siw *ServerInterfaceWrapper) ScanLibrary(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// UploadLibraryFile operation middleware
+func (siw *ServerInterfaceWrapper) UploadLibraryFile(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params UploadLibraryFileParams
+
+	// ------------- Required query parameter "name" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "name", r.URL.Query(), &params.Name, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "name"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UploadLibraryFile(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetMe operation middleware
 func (siw *ServerInterfaceWrapper) GetMe(w http.ResponseWriter, r *http.Request) {
 
@@ -2649,6 +2714,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/roots", wrapper.CreateLibraryRoot)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/library/roots/{id}", wrapper.DeleteLibraryRoot)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/scan", wrapper.ScanLibrary)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/uploads", wrapper.UploadLibraryFile)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/books", wrapper.ListLibraryBooks)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/books/{id}", wrapper.GetLibraryBook)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/books/{id}/merge", wrapper.MergeLibraryBooks)

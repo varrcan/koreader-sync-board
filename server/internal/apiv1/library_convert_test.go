@@ -231,7 +231,7 @@ func TestLibraryDeleteConverted(t *testing.T) {
 	}
 
 	user.do("DELETE", url, nil).expect(t, "not admin", 403, "forbidden")
-	admin.do("DELETE", fmt.Sprintf("/api/v1/library/files/%d", source), nil).expect(t, "regular", 409, "not_converted")
+	admin.do("DELETE", fmt.Sprintf("/api/v1/library/files/%d", source), nil).expect(t, "regular", 409, "file_read_only")
 	admin.do("DELETE", "/api/v1/library/files/9999", nil).expect(t, "missing", 404, "not_found")
 	admin.do("DELETE", url, nil).expect(t, "delete", 204, "")
 

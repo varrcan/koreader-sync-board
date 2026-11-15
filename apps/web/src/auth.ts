@@ -86,7 +86,11 @@ export function errorText(t: TFunction, err: unknown): string {
     case "not_convertible":
     case "conversion_failed":
     case "conversion_timeout":
-    case "not_converted":
+    case "file_read_only":
+    case "unsupported_format":
+    case "empty_file":
+    case "invalid_name":
+    case "file_exists":
     case "file_unavailable":
     case "invalid_metadata":
     case "cover_unavailable":

@@ -1,13 +1,14 @@
 // Package webdav — минимальный WebDAV под /dav/ для облачной синхронизации
 // KOReader (cloudstorage.koplugin, Cloud:sync): PROPFIND, GET/HEAD, PUT с If-Match.
 //
-// Корень /dav/ — единственная папка, набор файлов в нём определяется пользователем,
-// под которым выполнен вход. Вход — Basic с паролем устройства, той же учёткой,
-// что и kosync.
+// Набор файлов в корне /dav/ определяется пользователем, под которым выполнен вход.
+// Единственная подпапка — общий для всех WebDAV-диск книг /dav/books/ (books.go).
+// Вход — Basic с паролем устройства, той же учёткой, что и kosync.
 //
-// Свой обработчик, а не golang.org/x/net/webdav: тот не проверяет If-Match при PUT,
-// а без 412 цикл Cloud:sync не повторяется, и вторая читалка затирает выгрузку
-// первой. Сравнение условия и запись здесь идут в одной транзакции писателя.
+// Корень обслуживает свой обработчик, а не golang.org/x/net/webdav: тот не проверяет
+// If-Match при PUT, а без 412 цикл Cloud:sync не повторяется, и вторая читалка
+// затирает выгрузку первой. Сравнение условия и запись здесь идут в одной транзакции
+// писателя.
 package webdav
 
 import (
@@ -42,20 +43,30 @@ const maxPropfindBody = 64 << 10
 type Handler struct {
 	auth  *deviceauth.Basic
 	stats *statistics.Store
+	books *booksHandler // nil — диска книг нет
 	log   *slog.Logger
 
 	// beforeWrite вызывается между проверкой входа и записью PUT (для тестов).
 	beforeWrite func()
 }
 
-// New создаёт обработчик. ip определяет адрес клиента для ограничителя и лога.
-func New(acc *accounts.Service, stats *statistics.Store, ip *clientip.Resolver, log *slog.Logger) *Handler {
-	return &Handler{auth: deviceauth.New(acc, ip, log, "webdav", true), stats: stats, log: log}
+// New создаёт обработчик. ip определяет адрес клиента для ограничителя и лога;
+// books == nil — без диска книг.
+func New(acc *accounts.Service, stats *statistics.Store, books *Books, ip *clientip.Resolver, log *slog.Logger) *Handler {
+	h := &Handler{auth: deviceauth.New(acc, ip, log, "webdav", true), stats: stats, log: log}
+	if books != nil {
+		h.books = newBooksHandler(books, log)
+	}
+	return h
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p, ok := h.auth.Authenticate(w, r)
 	if !ok {
+		return
+	}
+	if h.books != nil && isBooks(r.URL.Path) {
+		h.books.ServeHTTP(w, r)
 		return
 	}
 	name, root, ok := resource(r.URL.Path)
@@ -232,7 +243,7 @@ type resourceType struct {
 }
 
 // propfind отвечает на листинг: Depth 0 — только сам ресурс, 1 и infinity
-// (и без заголовка) — папка и её файлы. Тело запроса не разбирается: KOReader
+// (и без заголовка) — папка, подпапка books/ без содержимого и файлы. Тело запроса не разбирается: KOReader
 // просит resourcetype, getcontentlength и getlastmodified, отдаются всегда они и
 // getetag. href папки — путь из запроса: по нему KOReader узнаёт текущую папку.
 func (h *Handler) propfind(w http.ResponseWriter, r *http.Request, p accounts.Principal, name string, root, ok bool) {
@@ -254,6 +265,11 @@ func (h *Handler) propfind(w http.ResponseWriter, r *http.Request, p accounts.Pr
 				return
 			}
 			dir := strings.TrimSuffix(href, "/") + "/"
+			if h.books != nil {
+				ms.Responses = append(ms.Responses, response{Href: dir + "books/", Propstat: okProps(prop{
+					ResourceType: resourceType{Collection: &struct{}{}},
+				})})
+			}
 			for _, f := range files {
 				ms.Responses = append(ms.Responses, fileResponse(dir+f.Name, f))
 			}

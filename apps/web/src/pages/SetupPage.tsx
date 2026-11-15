@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-// README запускает контейнер с --name ksb, а бинарник — как ksb.service.
+// docs/installation.md запускает контейнер с --name ksb, а бинарник — как ksb.service.
 const commands = [
   { key: "docker", command: "docker logs ksb 2>&1 | grep setup_code" },
   { key: "systemd", command: "journalctl -u ksb | grep setup_code" },

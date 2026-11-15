@@ -1,573 +1,93 @@
 # koreader-sync-board
 
+[![CI](https://github.com/varrcan/koreader-sync-board/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/varrcan/koreader-sync-board/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/varrcan/koreader-sync-board)](https://github.com/varrcan/koreader-sync-board/releases/latest)
+[![Docker image](https://img.shields.io/badge/ghcr.io-koreader--sync--board-2496ED?logo=docker&logoColor=white)](https://github.com/varrcan/koreader-sync-board/pkgs/container/koreader-sync-board)
+[![Go](https://img.shields.io/github/go-mod/go-version/varrcan/koreader-sync-board?filename=server%2Fgo.mod)](server/go.mod)
+[![License: AGPL-3.0](https://img.shields.io/github/license/varrcan/koreader-sync-board)](LICENSE)
+
 English | [Русский](README_ru.md)
 
-A lightweight self-hosted server for the **standard** KOReader — no plugins on the device.
+A lightweight self-hosted server for the **standard** KOReader: progress sync, reading
+statistics and a web panel, with nothing to install on the e-reader.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/panel-en-dark.png">
+  <img alt="The web panel: books in progress, reading statistics and recent activity" src="docs/images/panel-en-light.png">
+</picture>
+
+## Features
 
 - **Progress sync** compatible with the KOReader sync protocol (the same API as
-  `koreader/koreader-sync-server`): point KOReader's built-in *Progress sync* at this server.
-- **Every update is kept**: progress history is append-only, and progress for books the
-  server has never seen is stored too.
-- **One account, many devices**: each e-reader gets its own password that can be revoked
-  on its own.
-- **Reading statistics** through KOReader's built-in WebDAV cloud sync, and a **web panel**
-  with progress, activity and statistics.
-- **Library**: read-only folders of book files on the server give synced books their titles.
-- One static binary (linux/amd64, linux/arm64), SQLite, no Node at runtime.
+  [koreader-sync-server](https://github.com/koreader/koreader-sync-server)): point KOReader's
+  built-in *Progress sync* at this server. Every update is kept, including books the server has
+  never seen.
+- **One account, many devices**: each e-reader gets its own password that can be revoked on its
+  own.
+- **Reading statistics** through KOReader's built-in WebDAV cloud sync: time, pages and sessions
+  per book, merged across e-readers.
+- **Web panel** with books in progress, activity and statistics, in English and Russian, light
+  and dark.
+- **Library**: read-only folders of FB2, EPUB, PDF and other books give synced books their titles
+  and covers; metadata from FantLab, Open Library and Google Books; FB2 to EPUB conversion; an
+  **OPDS catalog** for e-readers.
+- **Sign-in with OIDC** (Zitadel, Keycloak, Authentik …) for the panel, a login rate limit and
+  fail2ban-ready logs.
+- One static binary (linux/amd64, linux/arm64) with SQLite inside, or a distroless Docker image.
 
-## Run with Docker
+## Quick start
 
 ```sh
 docker run -d --name ksb \
   -v ksb-data:/data \
   -p 8080:8080 \
   ghcr.io/varrcan/koreader-sync-board:latest
+docker logs ksb 2>&1 | grep setup_code
 ```
 
-Images for linux/amd64 and linux/arm64 are tagged by release (`1.2.3`, `1.2`) and `latest`.
-The examples below use the local name `koreader-sync-board`: either build the image from the
-source with `docker build -t koreader-sync-board .` or put the `ghcr.io/…` name in its place.
-
-Use a **named volume** (`ksb-data` above): Docker gives it the right owner on first use.
-The container runs as the unprivileged user `65532`. With a bind mount, make the host
-directory writable for that user first:
-
-```sh
-mkdir -p ./data && sudo chown 65532:65532 ./data
-docker run -d --name ksb -v "$PWD/data:/data" -p 8080:8080 koreader-sync-board
-```
-
-The image has a built-in health check (`ksb healthcheck`, which requests `/api/v1/health`).
-
-## Run the binary
-
-`ksb` is a single static binary with the panel embedded: it needs neither Docker nor Node at
-runtime, only a writable data directory. Download the archive for your architecture
-(`linux_amd64` or `linux_arm64`) from
-[Releases](https://github.com/varrcan/koreader-sync-board/releases) and check it against
-`SHA256SUMS`:
-
-```sh
-sha256sum -c --ignore-missing SHA256SUMS
-tar -xzf ksb_v1.2.3_linux_amd64.tar.gz
-```
-
-Or build it from source (Go 1.27, Node 22+ with pnpm):
-
-```sh
-pnpm install --frozen-lockfile
-pnpm -F web build
-CGO_ENABLED=0 go -C server build -trimpath -tags webdist -o ../bin/ksb ./cmd/ksb
-```
-
-or `task build` with [Task](https://taskfile.dev). Without the `webdist` tag the panel is
-replaced by a placeholder page. For another machine add `GOOS=linux GOARCH=arm64` (or
-`amd64`): the binary has no CGO and cross-compiles as is.
-
-Run it (a binary built from source is `bin/ksb`):
-
-```sh
-KSB_DATA_DIR=./data ./ksb serve
-```
-
-The settings are the same environment variables as in Docker (see
-[Configuration](#configuration)), but the default data directory is `/data`, so set
-`KSB_DATA_DIR`. The `ksb user …` and `ksb device …` commands open the database directly, so run
-them with the same `KSB_DATA_DIR` and as the same system user as the server; elsewhere in this
-README replace `docker exec ksb /ksb` with that.
-
-### systemd
-
-```sh
-sudo install -m 755 ksb /usr/local/bin/ksb
-sudo useradd --system --home-dir /var/lib/ksb --shell /usr/sbin/nologin ksb
-```
-
-`/etc/systemd/system/ksb.service`:
-
-```ini
-[Unit]
-Description=koreader-sync-board
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-User=ksb
-Group=ksb
-ExecStart=/usr/local/bin/ksb serve
-Environment=KSB_DATA_DIR=/var/lib/ksb
-Environment=KSB_LISTEN=:8080
-# Other settings: one KSB_…=… per line.
-EnvironmentFile=-/etc/ksb.env
-StateDirectory=ksb
-StateDirectoryMode=0750
-Restart=on-failure
-NoNewPrivileges=true
-ProtectSystem=strict
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```sh
-sudo systemctl daemon-reload
-sudo systemctl enable --now ksb
-sudo -u ksb KSB_DATA_DIR=/var/lib/ksb ksb user add alice
-```
-
-`ProtectSystem=strict` leaves the system read-only except the data directory, which suits
-library folders: the server only reads them. The `ksb` user needs read access to them.
-
-## First run and signing in to the panel
-
-Open `http://<host>:8080`. On a fresh server with no users the panel shows the **setup
-wizard**: it asks for a one-time setup code that the server writes to its log on startup.
-Find it with
-
-```sh
-docker logs ksb 2>&1 | grep setup_code          # Docker
-journalctl -u ksb | grep setup_code             # binary under systemd (ksb.service)
-```
-
-Enter the code (case, spaces and dashes do not matter), choose a username and a panel
-password of 8 to 256 characters: this creates the administrator and signs you in. The code
-lives only in memory, so after a restart look for the newest line. To skip the wizard, set
-`ADMIN_USER` and `ADMIN_PASSWORD` (both, or neither) before the first start.
-
-The **panel password** is separate from device passwords: a device password does not open
-the panel, and the panel password does not work in KOReader. Users created with
-`ksb user add` (and users from earlier versions) have no panel password yet; issue one with
-
-```sh
-docker exec ksb /ksb user passwd alice
-```
-
-It prints a generated password `xxxx-xxxx-xxxx-xxxx` **once** and signs the user out of
-all panel sessions; device passwords stay as they are. After signing in, the password can be
-changed in the panel, which signs out the user's other sessions.
-
-A panel session lasts 30 days from the last use. The session cookie gets the `Secure` flag
-when the panel is opened over HTTPS (directly or through a proxy that sends
-`X-Forwarded-Proto: https`); over plain `http://` in a local network it works without it.
-
-## Signing in with OIDC (Zitadel, Keycloak, Authentik …)
-
-The panel can sign users in through one OpenID Connect provider (Authorization Code flow
-with PKCE). KOReader is not affected: e-readers keep using device passwords. OIDC is enabled
-by three variables:
-
-```sh
-docker run ... \
-  -e KSB_OIDC_ISSUER=https://id.example.com \
-  -e KSB_OIDC_CLIENT_ID=123456789@books \
-  -e KSB_PUBLIC_URL=https://books.example.com \
-  -e KSB_OIDC_NAME=Zitadel \
-  koreader-sync-board
-```
-
-Register this **redirect URI** with the provider:
-
-```
-https://books.example.com/api/v1/auth/oidc/callback
-```
-
-`KSB_PUBLIC_URL` is the address users open the panel at: an origin only (`https://host` or
-`http://host:port`), without a path — serving the panel under a path prefix is not
-supported. If someone opens the panel by another address (a LAN IP, `localhost`), the sign-in
-button first sends them to `KSB_PUBLIC_URL` and the whole sign-in happens there; linking an
-account (see below) only works at the public address, and the panel shows a link to it.
-
-The server does not contact the provider on startup: discovery happens on the first sign-in,
-and if the provider is down the sign-in fails with a message and is retried next time, while
-the server and KOReader sync keep working.
-
-**Who gets in.** A panel user is tied to the provider account by its issuer and `sub`, never
-by name or email. There are two ways to tie them:
-
-- an existing user signs in with the panel password, opens **Account** and clicks **Link**;
-  **Unlink** removes the link (allowed only when the user has a panel password);
-- with `KSB_OIDC_AUTO_CREATE=true`, the first sign-in of an unknown provider account creates a
-  panel user named after the `preferred_username` claim (`KSB_OIDC_USERNAME_CLAIM`), with no
-  panel password and no devices. If that name is already taken, the sign-in is rejected and the
-  existing user stays untouched — sign in as that user with the password and link instead. A
-  user created this way can set a panel password under **Account**.
-
-The first administrator is still created by the setup wizard or `ADMIN_USER`/`ADMIN_PASSWORD`;
-before that, OIDC sign-in is refused. Who may sign in at all is decided by the provider (for
-example, which users are granted the project in Zitadel).
-
-**Admin role from a claim.** With `KSB_OIDC_ADMIN_CLAIM` and `KSB_OIDC_ADMIN_VALUE` set, every
-OIDC sign-in (and linking) makes the user `admin` if the claim in the ID token matches and
-`user` otherwise; the change is logged. A match is a string equal to the value, an array
-containing it, or an object with it as a key. Without these variables OIDC never changes roles.
-If the provider dropped the role by mistake, restore it with
-`ksb user role alice admin` (the next OIDC sign-in applies the claim again).
-
-**Turning off password sign-in.** `KSB_PANEL_PASSWORD_LOGIN=false` (only together with OIDC)
-disables the panel password for users **linked** to the provider; users without a link still
-sign in with their password, so you cannot lock yourself out. A safe switch:
-
-1. create the administrator with the setup wizard or `ADMIN_USER`/`ADMIN_PASSWORD`;
-2. sign in with the password and link the provider account under **Account**;
-3. restart with `KSB_PANEL_PASSWORD_LOGIN=false`.
-
-Signing out of the panel ends only the panel session, not the session at the provider;
-disabling a user at the provider does not end their open panel sessions — use
-`ksb user disable` for that.
-
-**Changing the issuer.** Links are tied to the issuer URL. After `KSB_OIDC_ISSUER` changes (a
-new domain for the provider), old links no longer match: remove them with
-`ksb user oidc-unlink alice` and link again.
-
-### Zitadel
-
-1. In a project, create an application of type **Web**: authentication method **PKCE**
-   (no secret) or **Code** (then set `KSB_OIDC_CLIENT_SECRET`). Add the redirect URI above.
-2. In the application's token settings enable **User Info inside ID Token** (the username
-   comes from the ID token) and, for the role claim, **User roles inside ID Token**.
-3. For the role claim, enable **Assert Roles on Authentication** in the project, create a
-   role (for example `admin`) and grant it to the administrators. Then set
-
-   ```sh
-   KSB_OIDC_ADMIN_CLAIM=urn:zitadel:iam:org:project:roles
-   KSB_OIDC_ADMIN_VALUE=admin
-   ```
-
-`KSB_OIDC_ISSUER` is the instance URL, for example `https://id.example.com`; the client ID is
-shown on the application page. For Keycloak or Authentik a `groups` claim works the same way:
-`KSB_OIDC_ADMIN_CLAIM=groups`, `KSB_OIDC_ADMIN_VALUE=ksb-admins`.
-
-## Create a user and a device
-
-Administrators manage users in the panel under **Users** (`/admin/users`, on a phone via
-**Account**): create a user, issue a new panel password, change the role, disable or enable,
-remove the OIDC link, delete. New and reset passwords are shown once. An administrator cannot
-apply these actions to their own account, so the panel cannot lock out its last administrator.
-
-Everything is also available in the `ksb` CLI, which has no such checks: it is the recovery
-path when nobody can sign in. It works on the same database while the server is running, and
-changes (for example, a revoked device) apply on the next request.
-
-```sh
-docker exec ksb /ksb user add alice
-docker exec ksb /ksb device add alice "Kindle"
-```
-
-`device add` prints the device password **once**, in the form `xxxx-xxxx` (8 random
-characters, easy to type on an e-reader keyboard); it is not stored in readable form and
-cannot be shown again. Passwords issued by earlier versions in a longer format keep working. Create a separate device for each e-reader:
-
-```sh
-docker exec ksb /ksb device list alice           # names, creation and last use, revoked flag
-docker exec ksb /ksb device revoke alice "Kindle"
-docker exec ksb /ksb user disable alice          # blocks all of alice's devices and panel sessions
-docker exec ksb /ksb user enable alice           # devices work again, old panel sessions do not
-docker exec ksb /ksb user delete alice           # removes devices, reading progress and statistics
-docker exec ksb /ksb user role alice admin       # or user
-docker exec ksb /ksb user oidc-unlink alice      # removes the OIDC link; `user list` shows links
-```
-
-After `ksb user enable`, an e-reader that was refused while the user was disabled may get
-refused for up to 10 more minutes: the running server remembers rejected keys and the CLI is a
-separate process. Enabling the user in the panel applies immediately.
-
-## Configure KOReader
-
-1. Open a book, then **Tools → Progress sync → Custom sync server** and enter
-   `http://<host>:8080`.
-2. **Register / Login** → enter the username and the **device password** from
-   `ksb device add`, then choose **Login**. (Registration from the device is disabled by
-   default; see `KSB_KOSYNC_REGISTRATION`.)
-3. Optional, KOReader v2026.07 and later: enable **Send document metadata** so the
-   server receives the filename, title and authors with each update. Without it the
-   server only knows the document hash.
-
-Both document matching methods (*Binary* and *Filename*) are supported.
-
-### Reading statistics
-
-KOReader sends its reading statistics (`statistics.sqlite3`: time and pages per book) through
-its built-in cloud sync over WebDAV. The server accepts it at `/dav` with the same device
-password; no plugin is needed.
-
-1. **Cloud storage** → add a **WebDAV** server: address `http://<host>:8080/dav`, the username
-   and the **device password**. Leave the start folder empty. KOReader 2026.07 has two such
-   menu items: use **Cloud storage+**. The older **Cloud storage** app keeps its own list of
-   servers, and statistics sync does not see it.
-2. **Reading statistics → Settings → Cloud sync** → pick this server, then in the folder list
-   long-press **Long-press here to choose current folder**.
-3. **Reading statistics → Sync now**. Repeat whenever you want to sync; KOReader has no timer.
-
-Several e-readers of one user merge their statistics through the server: KOReader downloads
-the file, merges it with its own and uploads the result. The vocabulary builder
-(`vocabulary_builder.sqlite3`) syncs the same way and is stored as is. Files are limited to
-64 MiB.
-
-- Use a password issued by the panel or `ksb device add`. KOReader URL-decodes the WebDAV
-  password, so a password containing `%` (possible for one set from KOReader with
-  **Register** or a password change) works for progress sync but not for WebDAV.
-- The panel shows when statistics were last synced and can upload a `statistics.sqlite3`
-  by hand (for example, from an old e-reader). The upload is merged into the statistics on
-  the server without deleting anything, and readers get it on their next sync.
-- Books synced without **Send document metadata** get their title and authors from the
-  statistics.
-
-## Library
-
-The server can index folders with book files. A book synced without **Send document
-metadata** and without statistics then gets its title, authors and file name from its file:
-the server matches the synced document hash to the file by the same partial MD5 KOReader
-computes (*Binary* matching) or by the MD5 of the file name (*Filename* matching, the
-CrossPoint default). Titles from the sync metadata and from the user's statistics still win.
-
-An administrator adds folders on the **Library** screen of the panel. The path is an absolute
-path on the server; the server only reads it and never writes there. Mount the folder
-read-only and enter the path inside the container:
-
-```sh
-docker run -d --name ksb \
-  -v ksb-data:/data \
-  -v /srv/books:/books:ro \
-  -p 8080:8080 \
-  koreader-sync-board
-```
-
-The container user `65532` (or the service user of a standalone binary) needs read access to
-the files and directories.
-
-- **Formats**: `.epub`, `.fb2`, `.fb2.zip`, `.pdf`, `.djvu`, `.mobi`, `.azw`, `.cbz`. Titles,
-  authors, series and language are read from FB2 (`<title-info>`, including single-byte
-  encodings such as windows-1251) and EPUB (the OPF package). Other formats are matched by
-  hash and file name only. Files and folders starting with a dot and `*.sdr` folders are
-  skipped; symbolic links inside a folder are not followed.
-- **Grouping**: files with the same normalized title and authors (for example the FB2 and
-  the EPUB of one book) form one library book.
-- **Scanning** runs on start, every `KSB_LIBRARY_SCAN_INTERVAL` (6 hours by default), after a
-  folder is added and with the **Scan** button. Unchanged files (same size and modification
-  time) are not read again.
-- **Covers**: after walking the folders, the scanner reads the cover of each FB2, FB2.ZIP and
-  EPUB file once (and again when the file changes) and keeps a JPEG thumbnail in `covers/`
-  inside the data directory; nothing is written to the book folders. Other formats and books
-  without a cover get a generated one. With `KSB_LIBRARY_SCAN_INTERVAL=0`, books indexed before
-  covers appeared get them on the next manual scan.
-- **FB2 to EPUB**: the **To EPUB** button on a book page converts an FB2 or FB2.ZIP file. The
-  EPUB joins the same book and is stored in `converted/` inside the data directory, never in
-  the book folders. It works like any other library file (hashes, progress, download) and its
-  bytes never change on their own, even if the FB2 or the converter does, because new bytes
-  would mean a new document hash. An admin can delete the result and convert again; reading
-  progress stays. One conversion runs at a time, in a separate process, for up to 5 minutes.
-- **Unavailable storage**: if a folder cannot be read or is suddenly empty (an unmounted NAS),
-  its index is kept and the panel shows the error. To clear the index of a folder emptied on
-  purpose, delete the folder in the panel.
-- **NFS**: mount with `soft` and a `timeo`: on a hard mount a dead server blocks the scan until
-  it comes back, and other folders are not scanned meanwhile.
-
-### Book metadata
-
-An administrator can correct a library book with **Metadata** on its page: pick a match found
-in the book's files or in an online catalog, review the form and save, or fill the form by hand.
-Edits are stored in the database, on top of what the files say: the files are never changed, and
-a rescan does not overwrite them. An empty field hides the value from the file. A field equal
-to the file's value is not stored, so it keeps following the file. **Reset to file data** removes all
-edits of the book.
-
-- **Catalogs**: FantLab and Open Library work without configuration. Google Books is enabled by
-  `KSB_GOOGLE_BOOKS_API_KEY`. The search looks up the ISBN from the book's files first, then the
-  title and authors.
-- **Network**: the server contacts catalogs only when an administrator opens the dialog or
-  searches. It needs outbound HTTPS to `api.fantlab.ru`, `fantlab.ru`, `openlibrary.org`,
-  `covers.openlibrary.org`, `archive.org` and its subdomains and, with a key, `www.googleapis.com`,
-  `books.google.com` and `*.googleusercontent.com`. If a catalog is unreachable, the dialog says
-  so and shows the others.
-- **Cache**: FantLab and Open Library answers are kept in the database for 7 days. Google Books
-  answers are not cached.
-- **Google Books terms**: saving a Google Books match stores its data in your database for as long
-  as the edit exists. Complying with the
-  [Google APIs Terms of Service](https://developers.google.com/terms) is up to the owner of the key.
-
-### OPDS catalog
-
-The library is also available as an OPDS 1.2 catalog at `/opds`, for KOReader, CrossPoint and
-other OPDS readers. It offers every book newest first, search, all files of a book with their
-format and size, and covers. A downloaded file is byte-for-byte the library file, so progress
-syncs against the same book. A book that has an FB2 but no EPUB also gets an EPUB link: the
-file is converted on the first download and kept, like a conversion from the panel.
-
-In KOReader: the search tab of the file manager → **OPDS catalog** → menu in the title bar →
-**Add catalog**, with the URL `https://your-server/opds`, your panel username and a **device
-password** (not the panel password). Revoking the device closes the catalog on it. Without a
-library the catalog is simply empty.
-
-The catalog uses HTTP Basic, so over plain `http://` the device password travels unencrypted:
-expose it through a TLS reverse proxy, as you would the WebDAV endpoint.
-
-## Configuration
-
-| Variable | Default | Meaning |
-|---|---|---|
-| `KSB_LISTEN` | `:8080` | Listen address |
-| `KSB_DATA_DIR` | `/data` | Data directory (SQLite database `ksb.sqlite3`, cover thumbnails in `covers/`, converted books in `converted/`, conversion work files in `tmp/`) |
-| `KSB_KOSYNC_REGISTRATION` | `false` | Allow creating accounts from KOReader (`POST /users/create`) |
-| `KSB_KOSYNC_SELF_DELETE` | `false` | Allow deleting an account from the device (`DELETE /users/me`) |
-| `KSB_TRUSTED_PROXIES` | — | Reverse proxies whose `X-Forwarded-For` is trusted: CIDRs or single addresses, comma-separated (see below) |
-| `ADMIN_USER`, `ADMIN_PASSWORD` | — | Create an admin with a panel password on first start (empty database only). Set both or neither; the password needs at least 8 characters |
-| `KSB_GOOGLE_BOOKS_API_KEY` | — | Enables Google Books as a metadata catalog; the key is never logged |
-| `KSB_OIDC_ISSUER` | — | OIDC provider URL; enables OIDC together with `KSB_OIDC_CLIENT_ID` and `KSB_PUBLIC_URL` |
-| `KSB_OIDC_CLIENT_ID` | — | Client ID at the provider |
-| `KSB_OIDC_CLIENT_SECRET` | — | Client secret; empty for a public client with PKCE only |
-| `KSB_PUBLIC_URL` | — | Public origin of the panel without a path, for the redirect URI |
-| `KSB_OIDC_NAME` | `SSO` | Label of the sign-in button: "Sign in with …" |
-| `KSB_OIDC_SCOPES` | `openid profile email` | Space-separated; `openid` is always added |
-| `KSB_OIDC_USERNAME_CLAIM` | `preferred_username` | Claim for the name of an auto-created user |
-| `KSB_OIDC_AUTO_CREATE` | `false` | Create a panel user on the first sign-in of an unknown provider account |
-| `KSB_OIDC_ADMIN_CLAIM`, `KSB_OIDC_ADMIN_VALUE` | — | Set the admin role from this ID token claim on every OIDC sign-in. Set both or neither |
-| `KSB_PANEL_PASSWORD_LOGIN` | `true` | `false` disables the panel password for users linked to OIDC (requires OIDC) |
-| `KSB_LIBRARY_SCAN_INTERVAL` | `6h` | Library scan period as a Go duration (`30m`, `12h`), at least `1m`; `0` scans only when a folder is added and on demand |
-
-`serve` also accepts `-listen` and `-data-dir`, which override the environment.
-
-## Failed logins
-
-After **10 failed logins within 10 minutes** from one client address, that address is
-blocked for **15 minutes**. KOReader logins (progress sync and WebDAV), panel sign-ins (a wrong password, including the
-current password when changing it) and wrong setup codes share this budget. IPv6 clients are counted per `/64` network. Counters live in
-memory and reset on restart.
-
-- KOReader shows the reason: *"Too many failed attempts. Try again in N minutes."*
-  (status 401, code 2001, plus a `Retry-After` header for other clients). A blocked
-  `POST /users/create` gets 402/2005 with a similar text.
-- A device that has logged in recently keeps syncing from a blocked address: the server
-  remembers successful checks, and every request extends that.
-- Sending the **same** wrong password again (for example, a forgotten e-reader whose device
-  was revoked) is answered at once and does not count towards the limit, so it cannot
-  lock out the other e-readers in the same home network.
-- With registration enabled, every `POST /users/create` counts as an attempt, successful
-  ones too.
-- The panel answers a blocked address with `429 Too Many Requests` and `Retry-After`.
-  Unlike KOReader, a repeated wrong panel password counts every time.
-- Failed OIDC sign-ins do not count and are logged as `panel: oidc login failed` with a
-  `reason`, not as `authorization failed`: a refusal at the provider is not password guessing.
-
-## Behind a reverse proxy
-
-Behind nginx, nginx proxy manager, Caddy or Traefik every request comes from the proxy's
-address. Tell the server which addresses are your proxy, so that it takes the client
-address from `X-Forwarded-For`:
-
-```sh
-docker run ... -e KSB_TRUSTED_PROXIES=172.17.0.0/16 koreader-sync-board
-```
-
-List **only the proxy itself** (its address, or the Docker network it reaches the server
-from). The header is read right to left, and the first address that is not a trusted proxy
-is the client; for a request from a non-trusted address the header is ignored. The proxy
-must append the client address, as nginx does with
-`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (nginx proxy manager does
-this by default).
-
-The proxy must not strip or rewrite the `ETag` response header and the `If-Match` request
-header on `/dav/`, and must allow request bodies up to 64 MiB (nginx:
-`client_max_body_size 64m;`). Without `ETag` KOReader uploads without `If-Match`, gets `412`
-and retries forever.
-
-The proxy must also pass the original `Host` header (nginx: `proxy_set_header Host $host;`;
-nginx proxy manager, Caddy and Traefik do this by default). The panel rejects sign-in and
-other changes from a foreign site; over plain `http://` browsers do not send
-`Sec-Fetch-Site`, so the server compares `Origin` with `Host`, and a rewritten `Host` makes
-every sign-in fail with `cross_origin`.
-
-Getting `KSB_TRUSTED_PROXIES` wrong has consequences either way:
-
-- **not set** behind a proxy: all clients share the proxy's address, so one attacker blocks
-  logins for everyone whose device has not logged in recently, and the log shows only the
-  proxy;
-- **too broad** (for example `0.0.0.0/0`): any client can put an arbitrary address into
-  `X-Forwarded-For` and bypass the limit.
-
-### fail2ban
-
-Every failed login is logged as one JSON line with the client address:
-
-```json
-{"time":"2026-11-04T21:47:10.84+03:00","level":"WARN","msg":"kosync: authorization failed","user":"alice","ip":"198.51.100.7","path":"/users/auth","reason":"unauthorized"}
-{"time":"2026-11-04T21:48:02.11+03:00","level":"WARN","msg":"panel: authorization failed","user":"alice","ip":"198.51.100.7","path":"/api/v1/auth/login","reason":"unauthorized"}
-{"time":"2026-11-04T21:49:31.52+03:00","level":"WARN","msg":"webdav: authorization failed","user":"alice","ip":"198.51.100.7","path":"/dav/statistics.sqlite3","reason":"unauthorized"}
-{"time":"2026-11-04T21:50:12.03+03:00","level":"WARN","msg":"opds: authorization failed","user":"alice","ip":"198.51.100.7","path":"/opds","reason":"unauthorized"}
-```
-
-Repeats of an already rejected password, requests refused because of a block and OPDS
-requests without any password (many clients try that first) are not logged. To ban persistent offenders for longer, create `/etc/fail2ban/filter.d/ksb.conf`:
-
-```ini
-[Definition]
-# Matches the plain JSON line and Docker's json-file log, where quotes are escaped.
-failregex = \\?"msg\\?":\\?"(?:kosync|panel|webdav|opds): authorization failed\\?".*\\?"ip\\?":\\?"<HOST>\\?",\\?"path\\?"
-datepattern = "time\\?":\\?"%%Y-%%m-%%dT%%H:%%M:%%S(?:\.\d+)?%%z
-```
-
-and `/etc/fail2ban/jail.d/ksb.local`:
-
-```ini
-[ksb]
-enabled  = true
-filter   = ksb
-# Docker's default json-file driver; for a binary under systemd use
-# backend = systemd and journalmatch = _SYSTEMD_UNIT=ksb.service instead.
-logpath  = /var/lib/docker/containers/*/*-json.log
-maxretry = 30
-findtime = 1h
-bantime  = 1d
-port     = http,https
-# Ports published by Docker bypass the INPUT chain.
-chain    = DOCKER-USER
-```
-
-Ban on the host that receives the client connections: with a reverse proxy, that is the
-proxy's host. Check the filter against your log with
-`fail2ban-regex /var/lib/docker/containers/<id>/<id>-json.log /etc/fail2ban/filter.d/ksb.conf`.
-
-## Talking to the sync API with curl
-
-Like the reference server, the sync API requires a versioned `Accept` header and
-authenticates with the **MD5 of the device password**:
-
-```sh
-KEY=$(printf %s 'abcd-efgh' | md5sum | cut -d' ' -f1)
-curl -H 'Accept: application/vnd.koreader.v1+json' \
-     -H 'x-auth-user: alice' -H "x-auth-key: $KEY" \
-     http://localhost:8080/users/auth
-# {"authorized":"OK"}
-```
-
-Without the header the server answers `412 {"code":100,"message":"Accept header not set."}`.
+1. Open `http://<host>:8080`, enter the setup code from the log and create the administrator.
+2. In the panel open **Devices** and add a device for your e-reader. Its password is shown once.
+3. In KOReader: **Tools → Progress sync → Custom sync server** → `http://<host>:8080`, then
+   **Register / Login** with your username and the device password → **Login**.
+
+The panel's **Help** screen walks through the rest: statistics sync, OPDS and troubleshooting.
+To run without Docker, download a binary from
+[Releases](https://github.com/varrcan/koreader-sync-board/releases) (see
+[Installation](docs/installation.md#binary)).
+
+## Documentation
+
+| | |
+|---|---|
+| [Installation](docs/installation.md) | Docker, binary, systemd, first run |
+| [Connecting KOReader](docs/koreader.md) | Progress sync, reading statistics over WebDAV, OPDS |
+| [Users and devices](docs/users.md) | Panel and device passwords, the `ksb` command line |
+| [Library and OPDS](docs/library.md) | Book folders, metadata, FB2 to EPUB, OPDS catalog |
+| [Signing in with OIDC](docs/oidc.md) | Zitadel, Keycloak, Authentik; admin role from a claim |
+| [Configuration](docs/configuration.md) | All environment variables |
+| [Security and reverse proxy](docs/security.md) | Login limit, `X-Forwarded-For`, fail2ban |
+| [KOReader compatibility](docs/koreader-compat.md) | Protocol details for contributors |
 
 ## Development
 
-Requirements: Go 1.27, Node 22+ with pnpm, [Task](https://taskfile.dev). LuaJIT is only
-needed to regenerate the partial MD5 reference data.
+Requirements: Go 1.27, Node 22+ with pnpm, [Task](https://taskfile.dev).
 
 ```sh
 pnpm install
 task build                 # web panel + bin/ksb with the panel embedded
-task build:placeholder     # bin/ksb without Node, placeholder page
-task test                  # Go tests (task test:full adds the >1 GiB sparse-file case)
+task test                  # Go tests
 task lint                  # golangci-lint + eslint
 task typecheck             # tsc --noEmit for all TS packages
 task generate              # regenerate Go and TS code from api/openapi.yaml
 pnpm -F web dev            # dev server for the panel, proxies /api to :8080
 ```
 
-Layout: `server/` (Go module), `apps/web` (Vite + React), `packages/api-client`
-(generated from `api/openapi.yaml`), `packages/i18n` (ru/en).
-
-Before touching the sync endpoints, read [docs/koreader-compat.md](docs/koreader-compat.md):
-error order and codes, document hashes, and quirks of KOReader and CrossPoint clients.
+Layout: `server/` (Go module), `apps/web` (Vite + React), `packages/api-client` (generated from
+`api/openapi.yaml`), `packages/i18n` (ru/en). Before touching the sync endpoints, read
+[docs/koreader-compat.md](docs/koreader-compat.md).
 
 ## License
 
-[AGPL-3.0](LICENSE)
-
-FB2 conversion uses [fb2cng](https://github.com/rupor-github/fb2cng) (GPL-3.0), linked through the
-fork [varrcan/fb2cng](https://github.com/varrcan/fb2cng), which only adds the files upstream
-generates at build time.
+[AGPL-3.0](LICENSE). FB2 conversion uses [fb2cng](https://github.com/rupor-github/fb2cng)
+(GPL-3.0), linked through the fork [varrcan/fb2cng](https://github.com/varrcan/fb2cng), which
+only adds the files upstream generates at build time.

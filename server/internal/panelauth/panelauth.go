@@ -113,7 +113,7 @@ func (a *Auth) ClientAddr(r *http.Request) netip.Addr {
 }
 
 // LogFailure пишет неудачную проверку пароля или кода настройки. Порядок полей
-// ip → path тот же, что у kosync: по нему работает фильтр fail2ban из README.
+// ip → path тот же, что у kosync: по нему работает фильтр fail2ban из docs/security.md.
 func (a *Auth) LogFailure(r *http.Request, user, reason string) {
 	authlog.Failure(a.log, "panel", r, a.ClientAddr(r), user, reason)
 }

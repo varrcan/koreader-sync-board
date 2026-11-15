@@ -61,6 +61,19 @@ the password itself. A user may have several devices, each with its own
 password; the key matches any non-revoked device of that user. Device keys are
 stored as argon2id of the MD5.
 
+Checking a device password by hand:
+
+```sh
+KEY=$(printf %s 'abcd-efgh' | md5sum | cut -d' ' -f1)
+curl -H 'Accept: application/vnd.koreader.v1+json' \
+     -H 'x-auth-user: alice' -H "x-auth-key: $KEY" \
+     http://localhost:8080/users/auth
+# {"authorized":"OK"}
+```
+
+Without the `Accept` header the server answers
+`412 {"code":100,"message":"Accept header not set."}`.
+
 ### Progress
 
 `PUT /syncs/progress` takes `document`, `progress` (an xpointer for reflowable

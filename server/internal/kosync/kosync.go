@@ -289,7 +289,7 @@ func (h *Handler) clientAddr(r *http.Request) netip.Addr {
 }
 
 // logFailure пишет неудачную попытку входа: имя и адрес клиента, без ключа.
-// По этой строке работает фильтр fail2ban из README.
+// По этой строке работает фильтр fail2ban из docs/security.md.
 func (h *Handler) logFailure(r *http.Request, user, reason string) {
 	if user == "" {
 		if v, ok := header(r, "x-auth-user").(string); ok {

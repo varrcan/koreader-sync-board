@@ -495,6 +495,59 @@ func TestTitleFromLibrary(t *testing.T) {
 	}
 }
 
+func TestTitleFromLibraryEdits(t *testing.T) {
+	e := newReadEnv(t)
+	alice := e.user("alice")
+	pb := e.device("alice", "pocketbook")
+	e.sync(pb, "edited", 0.1, time.Minute, Metadata{Title: "(КВ - 10) Перекрестки сумерек", Authors: "Джордан Роберт"})
+	e.sync(pb, "partly", 0.2, time.Minute, Metadata{Title: "Meta title", Authors: "Meta author"})
+	e.sync(pb, "hidden", 0.3, time.Minute, Metadata{Title: "Meta title", Authors: "Junk"})
+	e.statBook(alice, "edited", "Stat title", "Stat author", 100)
+	bookOf := func(fileID int64) int64 {
+		t.Helper()
+		var id int64
+		if err := e.s.db.Read.QueryRowContext(e.ctx, `SELECT book_id FROM library_files WHERE id = ?`, fileID).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	edit := func(fileID int64, title, authors any) {
+		t.Helper()
+		if _, err := e.s.db.Write.ExecContext(e.ctx, `INSERT INTO library_book_meta (book_id, title, authors, cover, updated_at)
+			VALUES (?, ?, ?, 'cover.jpg', 0)`, bookOf(fileID), title, authors); err != nil {
+			t.Fatal(err)
+		}
+	}
+	edit(e.libFile("kv10.epub", "File title", "File author", "edited"), "Перекрёстки Сумерек", "Роберт Джордан")
+	// NULL в правке — поле совпало с файлом, работает обычный порядок источников.
+	edit(e.libFile("partly.epub", "File title", "File author", "partly"), nil, "Edited author")
+	edit(e.libFile("hidden.epub", "File title", "Junk", "hidden"), nil, "")
+
+	got := map[string]Book{}
+	for _, b := range e.books(alice, FilterAll, 0, 50).Items {
+		got[b.Hash] = b
+	}
+	check := func(hash, title, authors string) {
+		t.Helper()
+		b := got[hash]
+		if str(b.Title) != title || str(b.Authors) != authors || str(b.Cover) != "cover.jpg" {
+			t.Errorf("%s: title %s, authors %s, cover %s", hash, str(b.Title), str(b.Authors), str(b.Cover))
+		}
+	}
+	check("edited", "Перекрёстки Сумерек", "Роберт Джордан")
+	check("partly", "Meta title", "Edited author")
+	check("hidden", "Meta title", "<nil>")
+
+	b, _, err := e.s.Book(e.ctx, alice, "edited")
+	if err != nil || str(b.Title) != "Перекрёстки Сумерек" {
+		t.Fatalf("book card: %+v %v", b, err)
+	}
+	a := e.activity(alice, "edited", 0, 10)
+	if len(a.Items) != 1 || str(a.Items[0].Title) != "Перекрёстки Сумерек" || str(a.Items[0].Authors) != "Роберт Джордан" {
+		t.Fatalf("activity: %+v", a.Items)
+	}
+}
+
 func TestLibraryBookID(t *testing.T) {
 	e := newReadEnv(t)
 	alice := e.user("alice")

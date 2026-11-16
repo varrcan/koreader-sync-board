@@ -28,9 +28,9 @@ const (
 	FilterUnknown  Filter = "unknown"
 )
 
-// Book — книга пользователя: метаданные из его синхронизаций (название и авторы,
-// если их не было, — из его статистики чтения, а затем из библиотеки; имя файла —
-// из библиотеки) и последнее событие.
+// Book — книга пользователя: метаданные из правок книги библиотеки, иначе из его
+// синхронизаций (название и авторы, если их не было, — из его статистики чтения, а
+// затем из файла библиотеки; имя файла — из библиотеки) и последнее событие.
 type Book struct {
 	Hash                     string
 	Title, Authors, Filename *string
@@ -93,13 +93,17 @@ const statBook = `LEFT JOIN stat_books st ON st.id = (
 		WHERE s.user_id = c.user_id AND s.document_id = c.document_id AND s.title <> ''
 		ORDER BY s.last_open DESC, s.id DESC LIMIT 1)`
 
-// libBook — файл библиотеки с тем же хешем (partial MD5 или md5 имени) и его
-// книга; при нескольких файлах — с наименьшим id. Библиотека — последний
-// источник названия: metadata и статистика принадлежат самому пользователю.
+// libBook — файл библиотеки с тем же хешем (partial MD5 или md5 имени), его
+// книга и правки её метаданных; при нескольких файлах — с наименьшим id.
+// Метаданные файла — последний источник названия: metadata и статистика
+// принадлежат самому пользователю. Правки же (вручную или из каталога) человек
+// внёс намеренно, они важнее всего, иначе исправленное название видно только в
+// библиотеке.
 const libBook = `LEFT JOIN library_files lf ON lf.id = (
 		SELECT h.file_id FROM library_file_hashes h WHERE h.hash = d.hash
 		ORDER BY h.file_id LIMIT 1)
-	LEFT JOIN library_books lb ON lb.id = lf.book_id`
+	LEFT JOIN library_books lb ON lb.id = lf.book_id
+	LEFT JOIN library_book_meta lm ON lm.book_id = lb.id`
 
 // unknownCond: файл в библиотеке даёт книге хотя бы имя, такая книга известна.
 const unknownCond = `c.meta_title IS NULL AND c.meta_filename IS NULL AND NOT EXISTS (
@@ -124,12 +128,15 @@ func ValidFilter(f Filter) bool {
 
 // metaColumns — название, авторы, имя файла из синхронизаций и путь файла
 // библиотеки: базовое имя берётся в Go (fileName), в SQLite нет надёжного basename.
-const metaColumns = `coalesce(c.meta_title, st.title, lb.title), coalesce(c.meta_authors, st.authors, lb.authors),
+// Пустая строка в правке — значение скрыто человеком, а не «не задано»: другие
+// источники её не перекрывают.
+const metaColumns = `nullif(coalesce(lm.title, c.meta_title, st.title, lb.title), ''),
+	nullif(coalesce(lm.authors, c.meta_authors, st.authors, lb.authors), ''),
 	c.meta_filename, lf.path`
 
 const bookColumns = `d.hash, ` + metaColumns + `,
 	e.percentage, e.server_ts, cr.name, e.device, c.event_id, lb.id,
-	coalesce((SELECT m.cover FROM library_book_meta m WHERE m.book_id = lb.id),
+	coalesce(lm.cover,
 		(SELECT f.cover FROM library_files f WHERE f.book_id = lb.id AND f.cover IS NOT NULL ORDER BY f.id LIMIT 1))
 	FROM progress_current c
 	JOIN documents d ON d.id = c.document_id

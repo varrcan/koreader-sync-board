@@ -14,7 +14,9 @@ The server can index folders with book files. A book synced without **Send docum
 and without statistics then gets its title, authors and file name from its file: the server
 matches the synced document hash to the file by the same partial MD5 KOReader computes
 (*Binary* matching) or by the MD5 of the file name (*Filename* matching, the CrossPoint
-default). Titles from the sync metadata and from the user's statistics still win.
+default). Titles from the sync metadata and from the user's statistics win over the file's
+metadata. Metadata edited in the library (by hand or from a catalog) wins over everything: the
+home page and the book list show it.
 
 An administrator adds folders on the **Library** screen of the panel. The path is an absolute
 path on the server; the server only reads it and never writes there. Mount the folder read-only

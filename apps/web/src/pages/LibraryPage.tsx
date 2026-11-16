@@ -1,7 +1,7 @@
 import type { LibraryBook } from "@ksb/api-client";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { BookDown, FolderCog, Search } from "lucide-react";
+import { BookDown, FolderCog, Search, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { meQuery } from "@/auth";
@@ -18,6 +18,7 @@ import { libraryBooksQuery, useLibrarySummary } from "@/library";
 const searchDelay = 300;
 
 function LibraryRow({ book }: { book: LibraryBook }) {
+  const { t } = useTranslation();
   return (
     <Link
       to="/library/books/$id"
@@ -36,6 +37,12 @@ function LibraryRow({ book }: { book: LibraryBook }) {
               {f}
             </Badge>
           ))}
+          {book.metadata_suggestion && (
+            <Badge variant="outline" className="px-1.5 py-0 text-[11px]">
+              <Sparkles />
+              {t("library.suggestion.badge")}
+            </Badge>
+          )}
         </div>
       </div>
     </Link>
@@ -46,7 +53,7 @@ export function LibraryPage() {
   const { t } = useTranslation();
   const { data: me } = useQuery(meQuery);
   const summary = useLibrarySummary();
-  const { q = "" } = useSearch({ from: "/app/library" });
+  const { q = "", suggested } = useSearch({ from: "/app/library" });
   const navigate = useNavigate({ from: "/library" });
   const isAdmin = me?.role === "admin";
   const upload = useUploadQueue();
@@ -60,11 +67,16 @@ export function LibraryPage() {
   }
   useEffect(() => {
     if (text === q) return;
-    const timer = setTimeout(() => void navigate({ search: text ? { q: text } : {}, replace: true }), searchDelay);
+    const timer = setTimeout(
+      () => void navigate({ search: (prev) => ({ ...prev, q: text || undefined }), replace: true }),
+      searchDelay,
+    );
     return () => clearTimeout(timer);
   }, [text, q, navigate]);
 
-  const books = useInfiniteQuery({ ...libraryBooksQuery(q), placeholderData: keepPreviousData });
+  // Фильтр в адресе у пользователя не действует: сервер отдал бы пустой список.
+  const onlySuggested = isAdmin && suggested === 1;
+  const books = useInfiniteQuery({ ...libraryBooksQuery(q, 50, onlySuggested), placeholderData: keepPreviousData });
   const items = books.data?.pages.flatMap((p) => p.items) ?? [];
   const empty = summary.data?.files === 0;
 
@@ -111,17 +123,31 @@ export function LibraryPage() {
       )}
 
       {!empty && (
-        <div className="relative max-w-5xl">
-          <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            type="search"
-            className="pl-8.5"
-            maxLength={200}
-            placeholder={t("library.search")}
-            aria-label={t("library.search")}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-          />
+        <div className="flex max-w-5xl flex-wrap gap-2">
+          <div className="relative min-w-60 flex-1">
+            <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              className="pl-8.5"
+              maxLength={200}
+              placeholder={t("library.search")}
+              aria-label={t("library.search")}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+            />
+          </div>
+          {isAdmin && (
+            <Button
+              variant={onlySuggested ? "secondary" : "outline"}
+              aria-pressed={onlySuggested}
+              onClick={() =>
+                void navigate({ search: (prev) => ({ ...prev, suggested: onlySuggested ? undefined : 1 }) })
+              }
+            >
+              <Sparkles />
+              {t("library.suggestion.filter")}
+            </Button>
+          )}
         </div>
       )}
 
@@ -140,7 +166,9 @@ export function LibraryPage() {
         </Card>
       )}
       {books.isSuccess && items.length === 0 && !empty && (
-        <p className="text-sm text-pretty text-muted-foreground">{q ? t("library.noResults") : t("library.empty")}</p>
+        <p className="text-sm text-pretty text-muted-foreground">
+          {q ? t("library.noResults") : onlySuggested ? t("library.suggestion.none") : t("library.empty")}
+        </p>
       )}
 
       {items.length > 0 && (

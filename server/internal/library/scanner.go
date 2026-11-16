@@ -61,6 +61,8 @@ type Scanner struct {
 
 	covers *Covers // nil — обложки не извлекаются
 	open   func(root, name string) (*os.File, error)
+
+	afterScan func() // nil — не вызывается
 }
 
 // Option настраивает Scanner.
@@ -79,6 +81,12 @@ func WithReader(hash func(string) (string, error), parse func(path, format strin
 // WithCovers включает проход обложек с записью миниатюр в c.
 func WithCovers(c *Covers) Option {
 	return func(s *Scanner) { s.covers = c }
+}
+
+// WithAfterScan задаёт f, вызываемую после каждого скана, который не прервала
+// остановка: к этому моменту обложки новых файлов извлечены.
+func WithAfterScan(f func()) Option {
+	return func(s *Scanner) { s.afterScan = f }
 }
 
 // NewScanner создаёт сканер. interval = 0 — скан только по Trigger.
@@ -176,6 +184,9 @@ func (s *Scanner) Run(ctx context.Context) {
 		s.mu.Lock()
 		s.active = false
 		s.mu.Unlock()
+		if ctx.Err() == nil && s.afterScan != nil {
+			s.afterScan()
+		}
 	}
 }
 

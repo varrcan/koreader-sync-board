@@ -20,11 +20,13 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/library"
 	"github.com/varrcan/koreader-sync-board/server/internal/library/convert"
 	"github.com/varrcan/koreader-sync-board/server/internal/library/lookup"
+	"github.com/varrcan/koreader-sync-board/server/internal/library/suggest"
 	"github.com/varrcan/koreader-sync-board/server/internal/opds"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
 	"github.com/varrcan/koreader-sync-board/server/internal/server"
+	"github.com/varrcan/koreader-sync-board/server/internal/settings"
 	"github.com/varrcan/koreader-sync-board/server/internal/sso"
 	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
@@ -93,7 +95,14 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 		log.Warn("uploads: cleanup failed", "error", err)
 	}
 	covers := library.NewCovers(filepath.Join(cfg.DataDir, "covers"))
-	scanner := library.NewScanner(lib, cfg.LibraryScanInterval, log, library.WithCovers(covers))
+	files := library.NewFileReader()
+	// Один Lookup на панель и фон: очередь и паузы провайдеров общие.
+	lk := lookup.New(db, cfg.GoogleBooksAPIKey, log)
+	serverSettings := settings.New(db)
+	suggester := suggest.New(lib, files, lk, serverSettings, log)
+	serverSettings.OnChange = suggester.Kick
+	scanner := library.NewScanner(lib, cfg.LibraryScanInterval, log, library.WithCovers(covers),
+		library.WithAfterScan(suggester.Kick))
 	convertCtx, stopConvert := context.WithCancel(ctx)
 	defer stopConvert()
 	converter, err := convert.New(convertCtx, lib, cfg.DataDir, log)
@@ -118,12 +127,13 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 			Progress:   prog,
 			Statistics: stats,
 			Library: apiv1.Library{
-				Store: lib, Scanner: scanner, Covers: covers, Files: library.NewFileReader(),
-				Lookup: lookup.New(db, cfg.GoogleBooksAPIKey, log), CoverSource: lookup.NewCoverFetcher(),
+				Store: lib, Scanner: scanner, Covers: covers, Files: files,
+				Lookup: lk, CoverSource: lookup.NewCoverFetcher(),
 				Converter: converter, Uploads: uploadsDir,
 			},
-			Log: log,
-			SSO: provider,
+			Settings: serverSettings,
+			Log:      log,
+			SSO:      provider,
 
 			PasswordLoginUnlinkedOnly: !cfg.PanelPasswordLogin,
 		}),
@@ -145,7 +155,11 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	scanDone := make(chan struct{})
 	go func() { scanner.Run(scanCtx); close(scanDone) }()
 	// Выполняется до db.Close (defer выше): закрыть базу под работающим сканером нельзя.
-	defer waitScanner(stopScan, scanDone, scannerStopTimeout, log)
+	defer waitStopped(stopScan, scanDone, scannerStopTimeout, log, "scanner")
+	suggestCtx, stopSuggest := context.WithCancel(ctx)
+	suggestDone := make(chan struct{})
+	go func() { suggester.Run(suggestCtx); close(suggestDone) }()
+	defer waitStopped(stopSuggest, suggestDone, scannerStopTimeout, log, "metadata suggestions")
 
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
@@ -168,18 +182,19 @@ func serve(ctx context.Context, cfg config.Config, args []string, log *slog.Logg
 	return nil
 }
 
-// scannerStopTimeout — сколько остановка сервера ждёт сканер библиотеки.
+// scannerStopTimeout — сколько остановка сервера ждёт фоновую работу библиотеки.
 const scannerStopTimeout = 5 * time.Second
 
-// waitScanner останавливает сканер и ждёт его не дольше timeout. Отмена контекста
-// не прерывает зависший системный вызов (hard-mount NFS): без предела сервер нельзя
-// было бы остановить. Теряется незакоммиченный пакет, следующий скан его повторит.
-func waitScanner(stop context.CancelFunc, done <-chan struct{}, timeout time.Duration, log *slog.Logger) {
+// waitStopped останавливает фоновую работу библиотеки (name — для лога) и ждёт её не
+// дольше timeout. Отмена контекста не прерывает зависший системный вызов (hard-mount
+// NFS): без предела сервер нельзя было бы остановить. Сканер теряет незакоммиченный
+// пакет, следующий скан его повторит; прерванная проверка книги остаётся в очереди.
+func waitStopped(stop context.CancelFunc, done <-chan struct{}, timeout time.Duration, log *slog.Logger, name string) {
 	stop()
 	select {
 	case <-done:
 	case <-time.After(timeout):
-		log.Warn("library: scanner did not stop", "timeout", timeout)
+		log.Warn("library: "+name+" did not stop", "timeout", timeout)
 	}
 }
 

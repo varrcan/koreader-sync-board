@@ -8,6 +8,7 @@ import {
   Library,
   LogOut,
   TabletSmartphone,
+  Settings,
   UserRound,
   UsersRound,
 } from "lucide-react";
@@ -25,7 +26,16 @@ function NavLink({
   icon,
   children,
 }: {
-  to: "/" | "/books" | "/library" | "/statistics" | "/devices" | "/admin/users" | "/account" | "/help";
+  to:
+    | "/"
+    | "/books"
+    | "/library"
+    | "/statistics"
+    | "/devices"
+    | "/admin/users"
+    | "/admin/settings"
+    | "/account"
+    | "/help";
   icon: ReactNode;
   children: ReactNode;
 }) {
@@ -107,9 +117,14 @@ export function AppLayout() {
             {t("nav.devices")}
           </NavLink>
           {me?.role === "admin" && (
-            <NavLink to="/admin/users" icon={<UsersRound />}>
-              {t("nav.users")}
-            </NavLink>
+            <>
+              <NavLink to="/admin/users" icon={<UsersRound />}>
+                {t("nav.users")}
+              </NavLink>
+              <NavLink to="/admin/settings" icon={<Settings />}>
+                {t("nav.settings")}
+              </NavLink>
+            </>
           )}
           <NavLink to="/account" icon={<UserRound />}>
             {t("nav.account")}

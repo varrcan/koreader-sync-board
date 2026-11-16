@@ -19,7 +19,8 @@
     "account": "Account",
     "devices": "Devices",
     "users": "Users",
-    "help": "Help"
+    "help": "Help",
+    "settings": "Settings"
   },
   "roles": {
     "admin": "Administrator",
@@ -465,6 +466,15 @@
       "webdavTitle": "WebDAV folder",
       "webdavAddress": "Folder address",
       "webdavHint": "Mount the address as a network drive. Use your username and the password of any of your devices from “Devices”. Windows accepts password sign-in only over HTTPS."
+    },
+    "suggestion": {
+      "badge": "Suggestion",
+      "filter": "With suggestions",
+      "none": "No books with suggestions.",
+      "title": "Metadata found in external catalogues",
+      "text": "A candidate may add a cover or description. Review and save the right one, or dismiss the suggestion.",
+      "view": "Review",
+      "dismiss": "Dismiss"
     }
   },
   "errors": {
@@ -769,6 +779,19 @@
       "title": "No statistics yet",
       "text": "Reading time, pages, sessions and the calendar come from KOReader statistics via cloud sync (WebDAV). Set it up on the reader or upload the statistics file below.",
       "help": "How to set it up"
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "description": "These apply to every user of the server.",
+    "metadataSuggest": {
+      "label": "Search for metadata in the background",
+      "hint": "The server looks up covers and descriptions on FantLab and Open Library for books that lack them. Nothing is applied on its own: the book gets a mark, and you review the candidates in the Metadata dialog on the book page.",
+      "privacy": "Book titles, authors and ISBNs are sent to these catalogues. Google Books is not used in the background.",
+      "pending": "Waiting to be checked: {{count}}",
+      "idle": "All books have been checked.",
+      "found": "With suggestions: {{count}}",
+      "noneFound": "No suggestions yet."
     }
   }
 }

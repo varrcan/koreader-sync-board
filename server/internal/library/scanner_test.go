@@ -645,3 +645,38 @@ func TestSummaryEmpty(t *testing.T) {
 		t.Fatalf("%+v %v", s, err)
 	}
 }
+
+func TestAfterScan(t *testing.T) {
+	scans := make(chan struct{}, 4)
+	var hang atomic.Pointer[chan struct{}]
+	walk := func(root string, fn fs.WalkDirFunc) error {
+		if h := hang.Load(); h != nil {
+			scans <- struct{}{} // вошли в обход
+			<-*h
+			return nil
+		}
+		return filepath.WalkDir(root, fn)
+	}
+	var calls atomic.Int32
+	e := newEnv(t, WithWalk(walk), WithAfterScan(func() { calls.Add(1) }))
+	e.addRoot(t.TempDir())
+	stop := e.run()
+	e.sc.Trigger()
+	e.idle()
+	e.sc.TriggerUploads()
+	e.idle()
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("after full and uploads scans: %d calls", n)
+	}
+
+	// Скан, прерванный остановкой, не сообщает о завершении.
+	h := make(chan struct{})
+	hang.Store(&h)
+	e.sc.Trigger()
+	<-scans
+	go func() { time.Sleep(20 * time.Millisecond); close(h) }()
+	stop()
+	if n := calls.Load(); n != 2 {
+		t.Fatalf("cancelled scan reported: %d calls", n)
+	}
+}

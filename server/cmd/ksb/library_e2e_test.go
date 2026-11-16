@@ -53,7 +53,7 @@ func TestWaitHungScanner(t *testing.T) {
 	<-entered
 
 	start := time.Now()
-	waitScanner(stop, done, 100*time.Millisecond, log)
+	waitStopped(stop, done, 100*time.Millisecond, log, "scanner")
 	if d := time.Since(start); d < 100*time.Millisecond || d > 2*time.Second {
 		t.Fatalf("waited %v", d)
 	}
@@ -65,7 +65,7 @@ func TestWaitHungScanner(t *testing.T) {
 	quiet := &syncBuffer{}
 	ok := make(chan struct{})
 	close(ok)
-	waitScanner(func() {}, ok, time.Second, slog.New(slog.NewJSONHandler(quiet, nil)))
+	waitStopped(func() {}, ok, time.Second, slog.New(slog.NewJSONHandler(quiet, nil)), "scanner")
 	if quiet.String() != "" {
 		t.Fatalf("unexpected log: %s", quiet)
 	}

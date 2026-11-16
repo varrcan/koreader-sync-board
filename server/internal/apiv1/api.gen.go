@@ -420,12 +420,16 @@ type LibraryBook struct {
 	// Formats Различные форматы файлов в порядке их id.
 	//
 	// Example: ["fb2","epub"]
-	Formats     []string `json:"formats"`
-	Id          int64    `json:"id"`
-	Language    *string  `json:"language"`
-	Series      *string  `json:"series"`
-	SeriesIndex *float64 `json:"series_index"`
-	Title       *string  `json:"title"`
+	Formats  []string `json:"formats"`
+	Id       int64    `json:"id"`
+	Language *string  `json:"language"`
+
+	// MetadataSuggestion Фоновый поиск нашёл во внешних каталогах кандидата, который закрывает пробел книги
+	// (обложку или аннотацию). Для пользователя с ролью `user` всегда `false`.
+	MetadataSuggestion bool     `json:"metadata_suggestion"`
+	Series             *string  `json:"series"`
+	SeriesIndex        *float64 `json:"series_index"`
+	Title              *string  `json:"title"`
 }
 
 // LibraryBookDetail defines model for LibraryBookDetail.
@@ -646,6 +650,15 @@ type MergeLibraryBooksRequest struct {
 	BookId int64 `json:"book_id"`
 }
 
+// MetadataSuggestionProgress defines model for MetadataSuggestionProgress.
+type MetadataSuggestionProgress struct {
+	// Found Книги с отметкой «есть предложение».
+	Found int `json:"found"`
+
+	// Pending Книги, ждущие проверки.
+	Pending int `json:"pending"`
+}
+
 // OIDCLinkStart defines model for OIDCLinkStart.
 type OIDCLinkStart struct {
 	// AuthorizeUrl Адрес авторизации у провайдера.
@@ -696,6 +709,18 @@ type RenameDeviceRequest struct {
 
 // Role defines model for Role.
 type Role string
+
+// Settings defines model for Settings.
+type Settings struct {
+	// LibraryMetadataSuggest Искать метаданные книг без обложки или аннотации в фоне (FantLab, Open Library).
+	LibraryMetadataSuggest bool                       `json:"library_metadata_suggest"`
+	MetadataSuggestions    MetadataSuggestionProgress `json:"metadata_suggestions"`
+}
+
+// SettingsForm Изменяемые настройки; отсутствующее поле не меняется.
+type SettingsForm struct {
+	LibraryMetadataSuggest *bool `json:"library_metadata_suggest,omitempty"`
+}
 
 // SetupRequest defines model for SetupRequest.
 type SetupRequest struct {
@@ -1001,6 +1026,10 @@ type ListLibraryBooksParams struct {
 	// длиннее 200 символов.
 	Q *string `form:"q,omitempty" json:"q,omitempty"`
 
+	// Suggested `true` — только книги с отметкой «есть предложение» фонового поиска метаданных.
+	// Пользователю с ролью `user` даёт пустой список.
+	Suggested *bool `form:"suggested,omitempty" json:"suggested,omitempty"`
+
 	// Limit Размер страницы.
 	Limit *Limit `form:"limit,omitempty" json:"limit,omitempty"`
 
@@ -1071,6 +1100,9 @@ type CreateLibraryRootJSONRequestBody = CreateLibraryRootRequest
 
 // ChangePasswordJSONRequestBody defines body for ChangePassword for application/json ContentType.
 type ChangePasswordJSONRequestBody = ChangePasswordRequest
+
+// PutSettingsJSONRequestBody defines body for PutSettings for application/json ContentType.
+type PutSettingsJSONRequestBody = SettingsForm
 
 // CompleteSetupJSONRequestBody defines body for CompleteSetup for application/json ContentType.
 type CompleteSetupJSONRequestBody = SetupRequest
@@ -1149,6 +1181,9 @@ type ServerInterface interface {
 	// GetLibraryBookMetadataCandidates Найти метаданные книги
 	// (GET /api/v1/library/books/{id}/metadata/candidates)
 	GetLibraryBookMetadataCandidates(w http.ResponseWriter, r *http.Request, id LibraryBookID, params GetLibraryBookMetadataCandidatesParams)
+	// DismissLibraryBookSuggestion Отклонить предложение метаданных
+	// (DELETE /api/v1/library/books/{id}/metadata/suggestion)
+	DismissLibraryBookSuggestion(w http.ResponseWriter, r *http.Request, id LibraryBookID)
 	// GetLibraryCover Миниатюра обложки
 	// (GET /api/v1/library/covers/{cover})
 	GetLibraryCover(w http.ResponseWriter, r *http.Request, cover string)
@@ -1191,6 +1226,12 @@ type ServerInterface interface {
 	// ChangePassword Смена своего пароля панели
 	// (PUT /api/v1/me/password)
 	ChangePassword(w http.ResponseWriter, r *http.Request)
+	// GetSettings Настройки сервера
+	// (GET /api/v1/settings)
+	GetSettings(w http.ResponseWriter, r *http.Request)
+	// PutSettings Изменить настройки
+	// (PUT /api/v1/settings)
+	PutSettings(w http.ResponseWriter, r *http.Request)
 	// GetSetup Нужен ли мастер первого запуска
 	// (GET /api/v1/setup)
 	GetSetup(w http.ResponseWriter, r *http.Request)
@@ -1733,6 +1774,19 @@ func (siw *ServerInterfaceWrapper) ListLibraryBooks(w http.ResponseWriter, r *ht
 		return
 	}
 
+	// ------------- Optional query parameter "suggested" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "suggested", r.URL.Query(), &params.Suggested, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "suggested"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "suggested", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "limit" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
@@ -1920,6 +1974,32 @@ func (siw *ServerInterfaceWrapper) GetLibraryBookMetadataCandidates(w http.Respo
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetLibraryBookMetadataCandidates(w, r, id, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DismissLibraryBookSuggestion operation middleware
+func (siw *ServerInterfaceWrapper) DismissLibraryBookSuggestion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id LibraryBookID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", r.PathValue("id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "int64", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DismissLibraryBookSuggestion(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2207,6 +2287,34 @@ func (siw *ServerInterfaceWrapper) ChangePassword(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ChangePassword(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutSettings operation middleware
+func (siw *ServerInterfaceWrapper) PutSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutSettings(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2700,6 +2808,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/users/{id}", wrapper.UpdateUser)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/users/{id}/password", wrapper.ResetUserPassword)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/users/{id}/oidc", wrapper.UnlinkUserOIDC)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/settings", wrapper.GetSettings)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/settings", wrapper.PutSettings)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books", wrapper.ListBooks)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books/{hash}", wrapper.GetBook)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/books/{hash}/statistics", wrapper.GetBookStatistics)
@@ -2721,6 +2831,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/books/{id}/metadata/candidates", wrapper.GetLibraryBookMetadataCandidates)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/library/books/{id}/metadata", wrapper.DeleteLibraryBookMetadata)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/library/books/{id}/metadata", wrapper.PutLibraryBookMetadata)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/library/books/{id}/metadata/suggestion", wrapper.DismissLibraryBookSuggestion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/library/covers/{cover}", wrapper.GetLibraryCover)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/library/files/{id}", wrapper.DeleteLibraryFile)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/library/files/{id}/convert", wrapper.ConvertLibraryFile)

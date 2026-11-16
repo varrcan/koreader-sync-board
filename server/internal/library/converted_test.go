@@ -51,7 +51,7 @@ func (e *testEnv) convert(managed, source, name, content string, b meta.Book) (i
 // file — файл книги по id.
 func (e *testEnv) file(book, id int64) File {
 	e.t.Helper()
-	d, err := e.st.Book(e.ctx, book, 0)
+	d, err := e.st.Book(e.ctx, book, 0, false)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestAddConverted(t *testing.T) {
 	if n := e.count(`SELECT count(*) FROM library_files WHERE id = ? AND cover_checked = 1`, id); n != 1 {
 		t.Fatal("cover_checked not copied")
 	}
-	d, err := e.st.Book(e.ctx, book, 0)
+	d, err := e.st.Book(e.ctx, book, 0, false)
 	if err != nil || d.Book.Title == nil || *d.Book.Title != "Пикник" {
 		t.Fatalf("book title %+v, %v", d.Book.Title, err)
 	}
@@ -377,7 +377,7 @@ func TestConvertedProgressByPartialMD5(t *testing.T) {
 	}
 	r := e.readers("alice")
 	r.sync("alice", partial, 0.4)
-	d, err := e.st.Book(e.ctx, e.bookOf(rel), r.devices["alice"].UserID)
+	d, err := e.st.Book(e.ctx, e.bookOf(rel), r.devices["alice"].UserID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestConvertedProgressByFilename(t *testing.T) {
 			doc := hex.EncodeToString(sum[:])
 			r := e.readers("alice")
 			r.sync("alice", doc, 0.7)
-			d, err := e.st.Book(e.ctx, e.bookOf(rel), r.devices["alice"].UserID)
+			d, err := e.st.Book(e.ctx, e.bookOf(rel), r.devices["alice"].UserID, false)
 			if err != nil {
 				t.Fatal(err)
 			}

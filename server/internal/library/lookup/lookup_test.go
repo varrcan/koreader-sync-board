@@ -386,7 +386,7 @@ func newTestLookup(t *testing.T, providers ...Provider) *Lookup {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { db.Close() })
-	return newLookup(providers, db, slog.New(slog.DiscardHandler))
+	return NewWithProviders(providers, db, slog.New(slog.DiscardHandler))
 }
 
 func describe(r Result) string {
@@ -416,6 +416,24 @@ func TestSearchOrderAndFallback(t *testing.T) {
 	l := newTestLookup(t, isbnOnly(ProviderFantLab), textOnly, isbnOnly(ProviderGoogle))
 	got := l.Search(ctx(), Query{ISBN: "9785170886470", Text: "x"})
 	eq(t, "order", describe(got), "fantlab:isbn:i google:isbn:i openlibrary:text:t")
+}
+
+func TestSearchBackgroundSkipsGoogle(t *testing.T) {
+	answer := func(id string) *fakeProvider {
+		return &fakeProvider{id: id, fn: func(context.Context, Query) ([]Candidate, error) { return hits(id, "t"), nil }}
+	}
+	fantlab, google, ol := answer(ProviderFantLab), answer(ProviderGoogle), answer(ProviderOpenLibrary)
+	l := newTestLookup(t, fantlab, google, ol)
+	got := l.Search(ctx(), Query{Text: "x", Background: true})
+	eq(t, "items", describe(got), "fantlab:text:t openlibrary:text:t")
+	eq(t, "providers", fmt.Sprint(got.Providers), "[{fantlab ok} {openlibrary ok}]")
+	eq(t, "google calls", google.calls.Load(), 0)
+
+	// Ручной поиск по-прежнему опрашивает Google, остальные отвечают из кеша.
+	got = l.Search(ctx(), Query{Text: "x"})
+	eq(t, "manual", describe(got), "fantlab:text:t google:text:t openlibrary:text:t")
+	eq(t, "google calls", google.calls.Load(), 1)
+	eq(t, "fantlab calls", fantlab.calls.Load(), 1)
 }
 
 func TestSearchProviderFailure(t *testing.T) {

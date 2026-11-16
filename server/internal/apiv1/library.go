@@ -172,7 +172,8 @@ func (s *Server) ListLibraryBooks(w http.ResponseWriter, r *http.Request, params
 		writeError(w, http.StatusBadRequest, "bad_request", "q is too long")
 		return
 	}
-	p, err := s.Library.Store.Books(r.Context(), q, before, limit)
+	f := library.BookFilter{Q: q, Suggested: params.Suggested != nil && *params.Suggested, Admin: isAdmin(r)}
+	p, err := s.Library.Store.Books(r.Context(), f, before, limit)
 	if err != nil {
 		s.internal(w, "list library books", err)
 		return
@@ -398,7 +399,7 @@ func (s *Server) deleteConverted(w http.ResponseWriter, r *http.Request, id int6
 
 func (s *Server) writeLibraryBook(w http.ResponseWriter, r *http.Request, status int, id int64) {
 	cur, _ := panelauth.FromContext(r.Context())
-	d, err := s.Library.Store.Book(r.Context(), id, cur.User.ID)
+	d, err := s.Library.Store.Book(r.Context(), id, cur.User.ID, isAdmin(r))
 	switch {
 	case errors.Is(err, library.ErrBookNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "book not found")
@@ -486,12 +487,16 @@ func (s *Server) librarySummary(r *http.Request) (LibrarySummary, error) {
 
 // requireAdmin отвечает 403, если владелец сессии не администратор.
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
-	cur, _ := panelauth.FromContext(r.Context())
-	if cur.User.Role != accounts.RoleAdmin {
+	if !isAdmin(r) {
 		writeError(w, http.StatusForbidden, "forbidden", "administrator role required")
 		return false
 	}
 	return true
+}
+
+func isAdmin(r *http.Request) bool {
+	cur, _ := panelauth.FromContext(r.Context())
+	return cur.User.Role == accounts.RoleAdmin
 }
 
 func libraryRoot(r library.Root) LibraryRoot {
@@ -502,6 +507,7 @@ func libraryBook(b library.Book) LibraryBook {
 	return LibraryBook{
 		Id: b.ID, Title: b.Title, Authors: b.Authors, Series: b.Series, SeriesIndex: b.SeriesIndex,
 		Language: b.Language, Files: b.Files, Formats: b.Formats, Filename: b.Filename, Cover: b.Cover,
+		MetadataSuggestion: b.MetadataSuggestion,
 	}
 }
 

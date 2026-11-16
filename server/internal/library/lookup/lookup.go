@@ -1,11 +1,13 @@
 // Package lookup ищет метаданные книг во внешних каталогах. Запросы уходят только
-// по явному действию администратора; сбой одного каталога не мешает остальным.
+// по явному действию администратора: из диалога метаданных или фоновым поиском,
+// который администратор включил в настройках. Сбой одного каталога не мешает остальным.
 package lookup
 
 import (
 	"context"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -47,8 +49,10 @@ const (
 )
 
 // Query — что искать: либо ISBN, либо Text. Language — двухбуквенный код языка книги.
+// Background — фоновый поиск: опрашиваются только кешируемые каталоги, Google нет.
 type Query struct {
 	ISBN, Text, Language string
+	Background           bool
 }
 
 // Candidate — книга, найденная провайдером. Пустая строка — значения нет. Partial —
@@ -105,24 +109,30 @@ func New(db *store.DB, googleKey string, log *slog.Logger) *Lookup {
 	if googleKey != "" {
 		providers = append(providers, NewGoogle(http.DefaultClient, googleBase, googleKey))
 	}
-	return newLookup(providers, db, log)
+	return NewWithProviders(providers, db, log)
 }
 
-func newLookup(providers []Provider, db *store.DB, log *slog.Logger) *Lookup {
+// NewWithProviders создаёт Lookup с заданными провайдерами.
+func NewWithProviders(providers []Provider, db *store.DB, log *slog.Logger) *Lookup {
 	return &Lookup{providers: providers, cache: newCache(db), timeout: providerTimeout, log: log}
 }
 
-// Search опрашивает всех провайдеров параллельно. Ответ есть всегда: сбой отражается
-// статусом провайдера.
+// Search опрашивает провайдеров параллельно. Ответ есть всегда: сбой отражается
+// статусом провайдера. Фоновый поиск пропускает Google: его ответы нельзя хранить,
+// и проход по библиотеке тратил бы квоту ключа.
 func (l *Lookup) Search(ctx context.Context, q Query) Result {
 	type outcome struct {
 		items  []Candidate
 		match  string
 		status string
 	}
-	outcomes := make([]outcome, len(l.providers))
+	providers := l.providers
+	if q.Background {
+		providers = slices.DeleteFunc(slices.Clone(providers), func(p Provider) bool { return !cacheable(p) })
+	}
+	outcomes := make([]outcome, len(providers))
 	var wg sync.WaitGroup
-	for i, p := range l.providers {
+	for i, p := range providers {
 		wg.Go(func() {
 			items, match, err := l.ask(ctx, p, q)
 			outcomes[i] = outcome{items: items, match: match, status: StatusOK}
@@ -134,8 +144,8 @@ func (l *Lookup) Search(ctx context.Context, q Query) Result {
 	}
 	wg.Wait()
 
-	res := Result{Items: []Candidate{}, Providers: make([]Status, len(l.providers))}
-	for i, p := range l.providers {
+	res := Result{Items: []Candidate{}, Providers: make([]Status, len(providers))}
+	for i, p := range providers {
 		res.Providers[i] = Status{ID: p.ID(), Status: outcomes[i].status}
 	}
 	for _, match := range []string{MatchISBN, MatchText} {
@@ -170,9 +180,7 @@ func (l *Lookup) ask(ctx context.Context, p Provider, q Query) ([]Candidate, str
 }
 
 func (l *Lookup) search(ctx context.Context, p Provider, q Query) ([]Candidate, error) {
-	// Условия Google запрещают хранить данные дольше заголовка ответа, а поиск по
-	// одной книге квоту не исчерпает.
-	cached := p.ID() != ProviderGoogle
+	cached := cacheable(p)
 	key := cacheKey(q)
 	if cached {
 		items, ok, err := l.cache.get(ctx, p.ID(), key)
@@ -194,6 +202,10 @@ func (l *Lookup) search(ctx context.Context, p Provider, q Query) ([]Candidate, 
 	}
 	return items, nil
 }
+
+// cacheable — ответы провайдера можно кешировать. Условия Google запрещают хранить
+// данные дольше заголовка ответа, а поиск по одной книге квоту не исчерпает.
+func cacheable(p Provider) bool { return p.ID() != ProviderGoogle }
 
 func anyPartial(items []Candidate) bool {
 	for _, c := range items {

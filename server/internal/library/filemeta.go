@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,32 +50,50 @@ func NewFileReader() FileReader { return FileReader{Budget: 3 * time.Second, Ope
 
 // Read объединяет метаданные файлов: основные поля — из первого файла с названием,
 // ISBN и аннотация — первые найденные. Недоступные файлы пропускаются.
+func (r FileReader) Read(files []FileLocation) meta.Book {
+	b, _ := r.ReadAll(files)
+	return b
+}
+
+// ReadAll — Read с признаком полноты. Чтение неполно, если файл не открылся или не
+// прочитался (*fs.PathError: корень отключён, EIO) либо вышел бюджет: «нет аннотации»
+// тогда может быть ложным. Ошибка разбора полноту не нарушает — повтор дал бы то же.
 //
 // Чтение идёт в горутине: системные вызовы на зависшем NFS контекстом не прерываются.
 // По истечении бюджета возвращается то, что успели прочитать, а горутина завершится,
 // когда вернётся системный вызов.
-func (r FileReader) Read(files []FileLocation) meta.Book {
-	books := make(chan meta.Book, len(files))
+func (r FileReader) ReadAll(files []FileLocation) (meta.Book, bool) {
+	type parsed struct {
+		book meta.Book
+		err  error
+	}
+	results := make(chan parsed, len(files))
 	go func() {
-		defer close(books)
+		defer close(results)
 		for _, f := range files {
-			if b, err := r.parse(f); err == nil {
-				books <- b
-			}
+			b, err := r.parse(f)
+			results <- parsed{b, err}
 		}
 	}()
 	timeout := time.NewTimer(r.Budget)
 	defer timeout.Stop()
 	var out meta.Book
+	complete := true
 	for {
 		select {
 		case <-timeout.C:
-			return out
-		case b, ok := <-books:
+			return out, false
+		case p, ok := <-results:
 			if !ok {
-				return out
+				return out, complete
 			}
-			merge(&out, b)
+			var pe *fs.PathError
+			switch {
+			case p.err == nil:
+				merge(&out, p.book)
+			case errors.As(p.err, &pe):
+				complete = false
+			}
 		}
 	}
 }

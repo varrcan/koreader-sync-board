@@ -10,6 +10,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/buildinfo"
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
+	"github.com/varrcan/koreader-sync-board/server/internal/settings"
 	"github.com/varrcan/koreader-sync-board/server/internal/sso"
 	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
 )
@@ -25,6 +26,7 @@ type Server struct {
 	Progress   *progress.Store
 	Statistics *statistics.Store
 	Library    Library
+	Settings   *settings.Store
 	Log        *slog.Logger
 	// SSO — OIDC-провайдер; nil — OIDC не настроен, его эндпоинты отвечают 404.
 	SSO *sso.Provider

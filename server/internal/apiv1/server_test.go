@@ -20,6 +20,7 @@ import (
 	"github.com/varrcan/koreader-sync-board/server/internal/panelauth"
 	"github.com/varrcan/koreader-sync-board/server/internal/progress"
 	"github.com/varrcan/koreader-sync-board/server/internal/ratelimit"
+	"github.com/varrcan/koreader-sync-board/server/internal/settings"
 	"github.com/varrcan/koreader-sync-board/server/internal/statistics"
 	"github.com/varrcan/koreader-sync-board/server/internal/store"
 	"github.com/varrcan/koreader-sync-board/server/internal/uploads"
@@ -88,7 +89,7 @@ func newEnv(t *testing.T, statsOpts ...statistics.Option) *env {
 	go func() { scanner.Run(scanCtx); close(scannerDone) }()
 	t.Cleanup(func() { stopScanner(); <-scannerDone })
 	api := &Server{Accounts: acc, Auth: panelauth.New(acc, nil, log), Setup: setup,
-		Progress: progress.New(db), Statistics: stats, Log: log,
+		Progress: progress.New(db), Statistics: stats, Log: log, Settings: settings.New(db),
 		Library: Library{Store: lib, Scanner: scanner, Covers: covers, Files: library.NewFileReader(), Uploads: up}}
 	srv := httptest.NewServer(NewHandler(api))
 	t.Cleanup(srv.Close)

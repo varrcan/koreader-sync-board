@@ -75,3 +75,37 @@ func TestParseableFiles(t *testing.T) {
 		t.Fatalf("%+v", got)
 	}
 }
+
+func TestFileReaderCompleteness(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, "a.fb2"), annotatedFB2)
+	write(t, filepath.Join(root, "broken.fb2"), "<FictionBook><description>")
+	r := NewFileReader()
+
+	// Битый файл открылся: повтор дал бы то же, чтение полное.
+	got, complete := r.ReadAll([]FileLocation{
+		{Root: root, Path: "broken.fb2", Format: "fb2"},
+		{Root: root, Path: "a.fb2", Format: "fb2"},
+	})
+	if !complete || got.Description == "" {
+		t.Fatalf("broken file: complete=%v, %+v", complete, got)
+	}
+
+	// Отключённый корень: аннотации нет, но это не значит, что её нет в файле.
+	if got, complete := r.ReadAll([]FileLocation{
+		{Root: root, Path: "a.fb2", Format: "fb2"},
+		{Root: filepath.Join(root, "gone"), Path: "b.fb2", Format: "fb2"},
+	}); complete || got.ISBN != "9785170886470" {
+		t.Fatalf("missing root: complete=%v, %+v", complete, got)
+	}
+
+	release := make(chan struct{})
+	defer close(release)
+	hung := FileReader{Budget: 30 * time.Millisecond, Open: func(string, string) (*os.File, error) {
+		<-release
+		return nil, os.ErrClosed
+	}}
+	if _, complete := hung.ReadAll([]FileLocation{{Root: "/", Path: "a.fb2", Format: "fb2"}}); complete {
+		t.Fatal("hung read reported complete")
+	}
+}

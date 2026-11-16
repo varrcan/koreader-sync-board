@@ -560,7 +560,7 @@ func TestEntryFallbackTitle(t *testing.T) {
 
 func (e *env) bookID() int64 {
 	e.t.Helper()
-	p, err := e.lib.Books(e.ctx, "", 0, 1)
+	p, err := e.lib.Books(e.ctx, library.BookFilter{}, 0, 1)
 	if err != nil || len(p.Items) == 0 {
 		e.t.Fatalf("%v, %+v", err, p)
 	}

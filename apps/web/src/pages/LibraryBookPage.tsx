@@ -1,7 +1,7 @@
 import type { LibraryBook, LibraryFile } from "@ksb/api-client";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, BookText, Download, FileOutput, Merge, Pin, Split, Trash2 } from "lucide-react";
+import { ArrowLeft, BookText, Download, FileOutput, Merge, Pin, Sparkles, Split, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ApiFailure } from "@/api";
@@ -42,6 +42,7 @@ import {
   useConvertFile,
   useDeleteFile,
   useMergeBooks,
+  useDismissSuggestion,
   useSplitFile,
 } from "@/library";
 
@@ -283,6 +284,32 @@ function DeleteFileDialog({ file, last, onClose }: { file: LibraryFile; last: bo
   );
 }
 
+/** Плашка «есть предложение»: смотреть — тот же диалог метаданных, кандидаты в кеше. */
+function SuggestionBanner({ id, onView }: { id: number; onView: () => void }) {
+  const { t } = useTranslation();
+  const dismiss = useDismissSuggestion(id);
+  return (
+    <section className="flex max-w-5xl flex-col gap-3 rounded-xl border border-primary/40 bg-primary/5 p-4 sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-1 items-start gap-2.5 [&>svg]:mt-0.5 [&>svg]:size-4.5 [&>svg]:shrink-0">
+        <Sparkles />
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h2 className="text-sm font-semibold">{t("library.suggestion.title")}</h2>
+          <p className="text-sm text-pretty text-muted-foreground">{t("library.suggestion.text")}</p>
+          <FormError message={dismiss.isError ? libraryErrorText(t, dismiss.error) : undefined} />
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" onClick={onView}>
+          {t("library.suggestion.view")}
+        </Button>
+        <Button size="sm" variant="ghost" disabled={dismiss.isPending} onClick={() => dismiss.mutate()}>
+          {t("library.suggestion.dismiss")}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 function BookView({ id }: { id: number }) {
   const { t } = useTranslation();
   const { data: me } = useQuery(meQuery);
@@ -344,6 +371,8 @@ function BookView({ id }: { id: number }) {
           )}
         </div>
       </section>
+
+      {isAdmin && book.metadata_suggestion && <SuggestionBanner id={book.id} onView={() => setEditing(true)} />}
 
       {description && (
         <section className="flex max-w-5xl flex-col gap-2 rounded-xl border bg-card p-5">

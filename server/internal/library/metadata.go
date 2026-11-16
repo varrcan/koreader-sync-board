@@ -95,6 +95,9 @@ func (s *Store) SetMetadata(ctx context.Context, id int64, e MetadataEdit) error
 			return err
 		}
 	}
+	if err := viewedSuggestion(ctx, tx, id, s.now().Unix()); err != nil {
+		return err
+	}
 	if err := refreshBooks(ctx, tx, []int64{id}); err != nil {
 		return err
 	}
@@ -117,7 +120,8 @@ func sameIndex(form *float64, file sql.NullFloat64) bool {
 }
 
 // ClearMetadata удаляет все правки книги, включая обложку. Закрепление файлов
-// остаётся: книгу файла по-прежнему определил человек.
+// остаётся: книгу файла по-прежнему определил человек. Состояние фонового поиска
+// тоже: администратор сознательно вернул данные файла.
 func (s *Store) ClearMetadata(ctx context.Context, id int64) error {
 	tx, err := s.db.Write.BeginTx(ctx, nil)
 	if err != nil {

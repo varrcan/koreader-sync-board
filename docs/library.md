@@ -95,7 +95,7 @@ all edits of the book.
   `KSB_GOOGLE_BOOKS_API_KEY`. The search looks up the ISBN from the book's files first, then the
   title and authors.
 - **Network**: the server contacts catalogs only when an administrator opens the dialog or
-  searches. It needs outbound HTTPS to `api.fantlab.ru`, `fantlab.ru`, `openlibrary.org`,
+  searches, or when background search is on (see below). It needs outbound HTTPS to `api.fantlab.ru`, `fantlab.ru`, `openlibrary.org`,
   `covers.openlibrary.org`, `archive.org` and its subdomains and, with a key,
   `www.googleapis.com`, `books.google.com` and `*.googleusercontent.com`. If a catalog is
   unreachable, the dialog says so and shows the others.
@@ -105,6 +105,26 @@ all edits of the book.
   long as the edit exists. Complying with the
   [Google APIs Terms of Service](https://developers.google.com/terms) is up to the owner of the
   key.
+
+### Background search
+
+**Settings → Search for metadata in the background** (administrators only, off by default) lets
+the server look for matches on its own. It checks every library book that has a title but no
+cover or description, neither in the edits nor in the files, one book at a time with a 5-second
+pause between searches. New books are checked after each scan.
+
+- **What is sent**: the same query as the dialog sends: the ISBN from the files, the title and
+  authors. Only FantLab and Open Library are asked; Google Books is never used in the
+  background.
+- **Nothing is applied**: when a match has the same ISBN or the same title and fills a gap, the
+  book gets a **Suggestion** mark in the library, and its page offers **Review** and **Dismiss**.
+  Review opens the Metadata dialog, whose matches now come from the cache. Saving the form or
+  dismissing removes the mark for good.
+- **Retries**: a book is checked once. If a catalog fails or the book's files cannot be read
+  (an unmounted share), the check is repeated after 24 hours. Books without a title are skipped:
+  searching by file name is too unreliable to run unattended.
+- **Progress**: the settings page shows how many books are waiting and how many have
+  suggestions. Turning the setting off stops the search right away; existing marks stay.
 
 ## FB2 to EPUB
 

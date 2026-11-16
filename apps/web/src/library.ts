@@ -43,14 +43,14 @@ const libraryRootsQuery = queryOptions({
   },
 });
 
-export function libraryBooksQuery(q: string, limit = 50) {
+export function libraryBooksQuery(q: string, limit = 50, suggested = false) {
   return infiniteQueryOptions({
-    queryKey: ["library", "books", "list", q, limit],
+    queryKey: ["library", "books", "list", q, limit, suggested],
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last: LibraryBookPage) => last.next_cursor ?? undefined,
     queryFn: async ({ pageParam }): Promise<LibraryBookPage> => {
       const { data, error, response } = await api.GET("/api/v1/library/books", {
-        params: { query: { q: q || undefined, limit, cursor: pageParam } },
+        params: { query: { q: q || undefined, suggested: suggested || undefined, limit, cursor: pageParam } },
       });
       if (error) throw failure(error, response);
       return data;
@@ -260,6 +260,8 @@ export function libraryCandidatesQuery(id: number, search: CandidateSearch) {
 /** Правка меняет название, обложку и поиск каталога и названия книг прогресса. */
 function invalidateBook(client: QueryClient) {
   void client.invalidateQueries({ queryKey: ["library", "books"] });
+  // Сохранение снимает отметку предложения.
+  void client.invalidateQueries({ queryKey: ["settings"] });
   invalidateProgress(client);
 }
 
@@ -275,6 +277,23 @@ export function useSaveMetadata(id: number) {
       return data;
     },
     onSuccess: () => invalidateBook(client),
+  });
+}
+
+/** Отклонение снимает отметку в книге и каталоге и меняет ход проверки. */
+export function useDismissSuggestion(id: number) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<void> => {
+      const { error, response } = await api.DELETE("/api/v1/library/books/{id}/metadata/suggestion", {
+        params: { path: { id } },
+      });
+      if (error) throw failure(error, response);
+    },
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ["library", "books"] });
+      void client.invalidateQueries({ queryKey: ["settings"] });
+    },
   });
 }
 

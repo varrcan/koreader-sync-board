@@ -667,6 +667,51 @@ paths:
           $ref: "#/components/responses/SelfAction"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/settings:
+    get:
+      operationId: getSettings
+      summary: Настройки сервера
+      description: Только администратору. Настройки, которые меняются в панели, и ход фонового поиска метаданных.
+      tags: [settings]
+      responses:
+        "200":
+          description: Настройки
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
+    put:
+      operationId: putSettings
+      summary: Изменить настройки
+      description: Только администратору. Отсутствующее поле оставляет настройку без изменений.
+      tags: [settings]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SettingsForm"
+      responses:
+        "200":
+          description: Настройки после изменения
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Settings"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/books:
     get:
       operationId: listBooks
@@ -1159,6 +1204,14 @@ paths:
           schema:
             type: string
             maxLength: 200
+        - name: suggested
+          in: query
+          required: false
+          description: |
+            `true` — только книги с отметкой «есть предложение» фонового поиска метаданных.
+            Пользователю с ролью `user` даёт пустой список.
+          schema:
+            type: boolean
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Cursor"
       responses:
@@ -1287,7 +1340,7 @@ paths:
       description: |
         Только администратору. Заменяет все правки книги: значение, совпавшее с данными
         файла, не хранится, пустое — скрывает значение файла. При наличии правок все файлы
-        книги закрепляются за ней.
+        книги закрепляются за ней. Снимает отметку «есть предложение».
       tags: [library]
       requestBody:
         required: true
@@ -1334,6 +1387,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LibraryBookDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/LibraryNotFound"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/library/books/{id}/metadata/suggestion:
+    parameters:
+      - $ref: "#/components/parameters/LibraryBookID"
+    delete:
+      operationId: dismissLibraryBookSuggestion
+      summary: Отклонить предложение метаданных
+      description: |
+        Только администратору. Снимает отметку «есть предложение»; фоновый поиск книгу больше
+        не проверяет. Для книги без отметки ответ тот же.
+      tags: [library]
+      responses:
+        "204":
+          description: Отметки нет
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -1770,7 +1844,7 @@ components:
           description: Пустое или отсутствующее — последний элемент пути.
     LibraryBook:
       type: object
-      required: [id, title, authors, series, series_index, language, files, formats, filename, cover]
+      required: [id, title, authors, series, series_index, language, files, formats, filename, cover, metadata_suggestion]
       properties:
         id:
           type: integer
@@ -1809,6 +1883,11 @@ components:
           description: |
             Идентификатор миниатюры для `GET /api/v1/library/covers/{cover}`: обложка правки, иначе
             файла с наименьшим id среди файлов книги с обложкой. `null`, если обложки нет.
+        metadata_suggestion:
+          type: boolean
+          description: |
+            Фоновый поиск нашёл во внешних каталогах кандидата, который закрывает пробел книги
+            (обложку или аннотацию). Для пользователя с ролью `user` всегда `false`.
     LibraryBookPage:
       type: object
       required: [items, next_cursor]
@@ -2043,6 +2122,31 @@ components:
         reset_cover:
           type: boolean
           description: Убрать обложку правки. Вместе с `cover_url` — ошибка.
+    Settings:
+      type: object
+      required: [library_metadata_suggest, metadata_suggestions]
+      properties:
+        library_metadata_suggest:
+          type: boolean
+          description: Искать метаданные книг без обложки или аннотации в фоне (FantLab, Open Library).
+        metadata_suggestions:
+          $ref: "#/components/schemas/MetadataSuggestionProgress"
+    MetadataSuggestionProgress:
+      type: object
+      required: [pending, found]
+      properties:
+        pending:
+          type: integer
+          description: Книги, ждущие проверки.
+        found:
+          type: integer
+          description: Книги с отметкой «есть предложение».
+    SettingsForm:
+      type: object
+      description: Изменяемые настройки; отсутствующее поле не меняется.
+      properties:
+        library_metadata_suggest:
+          type: boolean
     MergeLibraryBooksRequest:
       type: object
       required: [book_id]

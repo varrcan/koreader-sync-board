@@ -19,6 +19,7 @@ import { LibraryBookPage } from "./pages/LibraryBookPage";
 import { LibraryPage } from "./pages/LibraryPage";
 import { LibraryRootsPage } from "./pages/LibraryRootsPage";
 import { LoginPage } from "./pages/LoginPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { SetupPage } from "./pages/SetupPage";
 import { StatisticsPage } from "./pages/StatisticsPage";
 import { UsersPage } from "./pages/UsersPage";
@@ -105,8 +106,11 @@ const bookRoute = createRoute({
 const libraryRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/library",
-  validateSearch: (search: Record<string, unknown>): { q?: string } =>
-    typeof search.q === "string" && search.q !== "" ? { q: search.q } : {},
+  // suggested=1 — только книги с предложением фонового поиска (фильтр администратора).
+  validateSearch: (search: Record<string, unknown>): { q?: string; suggested?: 1 } => ({
+    ...(typeof search.q === "string" && search.q !== "" ? { q: search.q } : {}),
+    ...(search.suggested === 1 || search.suggested === "1" || search.suggested === true ? { suggested: 1 as const } : {}),
+  }),
   component: LibraryPage,
 });
 
@@ -155,6 +159,16 @@ const usersRoute = createRoute({
     await queryClient.ensureQueryData(methodsQuery);
   },
   component: UsersPage,
+});
+
+const settingsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/admin/settings",
+  beforeLoad: async () => {
+    const me = await queryClient.ensureQueryData(meQuery);
+    if (me?.role !== "admin") throw redirect({ to: "/", replace: true });
+  },
+  component: SettingsPage,
 });
 
 // Результат привязки OIDC: сервер возвращает браузер сюда с oidc=linked или oidc_error.
@@ -223,6 +237,7 @@ const routeTree = rootRoute.addChildren([
     statisticsRoute,
     devicesRoute,
     usersRoute,
+    settingsRoute,
     accountRoute,
     passwordRoute,
     helpRoute,

@@ -4,7 +4,6 @@ import (
 	"errors"
 	"math"
 	"net/http"
-	"path/filepath"
 	"slices"
 	"strings"
 	"unicode/utf8"
@@ -40,7 +39,7 @@ func (s *Server) GetLibraryBookMetadataCandidates(w http.ResponseWriter, r *http
 		}
 	}
 	cur, _ := panelauth.FromContext(r.Context())
-	book, err := s.Library.Store.Book(r.Context(), id, cur.User.ID)
+	book, err := s.Library.Store.Book(r.Context(), id, cur.User.ID, true)
 	switch {
 	case errors.Is(err, library.ErrBookNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "book not found")
@@ -58,9 +57,9 @@ func (s *Server) GetLibraryBookMetadataCandidates(w http.ResponseWriter, r *http
 	// Ручной запрос не дополняется данными файла: иначе ошибочный ISBN в файле нельзя
 	// было бы обойти.
 	if text == "" && isbn == "" {
-		text, isbn = autoQuery(book.Book), fromFiles.ISBN
+		text, isbn = library.AutoQuery(book.Book), fromFiles.ISBN
 	}
-	res := s.Library.Lookup.Search(r.Context(), lookup.Query{ISBN: isbn, Text: text, Language: bookLanguage(book.Book)})
+	res := s.Library.Lookup.Search(r.Context(), lookup.Query{ISBN: isbn, Text: text, Language: library.BookLanguage(book.Book)})
 
 	out := LibraryMetadataCandidates{
 		Query: optional(text), Isbn: optional(isbn),
@@ -88,7 +87,7 @@ func (s *Server) PutLibraryBookMetadata(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	cur, _ := panelauth.FromContext(r.Context())
-	book, err := s.Library.Store.Book(r.Context(), id, cur.User.ID)
+	book, err := s.Library.Store.Book(r.Context(), id, cur.User.ID, true)
 	switch {
 	case errors.Is(err, library.ErrBookNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "book not found")
@@ -170,6 +169,24 @@ func (s *Server) DeleteLibraryBookMetadata(w http.ResponseWriter, r *http.Reques
 	s.writeLibraryBook(w, r, http.StatusOK, id)
 }
 
+func (s *Server) DismissLibraryBookSuggestion(w http.ResponseWriter, r *http.Request, id LibraryBookID) {
+	if !requireAdmin(w, r) {
+		return
+	}
+	err := s.Library.Store.DismissSuggestion(r.Context(), id)
+	switch {
+	case errors.Is(err, library.ErrBookNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "book not found")
+		return
+	case err != nil:
+		s.internal(w, "dismiss library suggestion", err)
+		return
+	}
+	cur, _ := panelauth.FromContext(r.Context())
+	s.Log.Info("panel: library suggestion dismissed", "user", cur.User.Username, "book", id)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // metadataEdit проверяет форму; непустая строка — причина отказа. Значения книги
 // пределам не подчиняются: файлы не ограничены, а форма присылает все поля, и
 // длинный список авторов антологии иначе не дал бы исправить даже серию.
@@ -222,41 +239,6 @@ func optional(s string) *string {
 		return nil
 	}
 	return &s
-}
-
-// autoQuery — текст запроса: название и авторы, а без названия — имя файла без расширения.
-func autoQuery(b library.Book) string {
-	var text string
-	if b.Title != nil {
-		text = *b.Title
-		if b.Authors != nil {
-			text += " " + *b.Authors
-		}
-	} else {
-		text = strings.TrimSuffix(b.Filename, ".fb2.zip")
-		if text == b.Filename {
-			text = strings.TrimSuffix(b.Filename, filepath.Ext(b.Filename))
-		}
-	}
-	if r := []rune(text); len(r) > maxSearchLength {
-		text = string(r[:maxSearchLength])
-	}
-	return strings.TrimSpace(text)
-}
-
-// bookLanguage — первые две буквы языка книги. Поле свободное (встречается «рус»),
-// а каталогам нужен код: не-ASCII значение кодом не считается.
-func bookLanguage(b library.Book) string {
-	if b.Language == nil || len(*b.Language) < 2 {
-		return ""
-	}
-	code := strings.ToLower((*b.Language)[:2])
-	for _, c := range []byte(code) {
-		if c < 'a' || c > 'z' {
-			return ""
-		}
-	}
-	return code
 }
 
 func fileCandidate(b meta.Book) lookup.Candidate {

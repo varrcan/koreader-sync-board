@@ -34,7 +34,8 @@ func init() {
 
 // Book — книга библиотеки. Formats — различные форматы файлов в порядке их id,
 // Filename — имя без каталогов файла с наименьшим id, Cover — миниатюра правки,
-// иначе первого файла с обложкой.
+// иначе первого файла с обложкой. MetadataSuggestion — у книги есть предложение
+// фонового поиска; заполняется только для администратора.
 type Book struct {
 	ID                     int64
 	Title, Authors, Series *string
@@ -44,6 +45,16 @@ type Book struct {
 	Formats                []string
 	Filename               string
 	Cover                  *string
+	MetadataSuggestion     bool
+}
+
+// BookFilter — отбор каталога. Q — слова поиска, Suggested — только книги с
+// предложением. Admin — каталог смотрит администратор: остальным отметка не
+// показывается, и Suggested даёт пустой список.
+type BookFilter struct {
+	Q         string
+	Suggested bool
+	Admin     bool
 }
 
 // BookPage — страница каталога. Next — курсор следующей страницы, 0 на последней.
@@ -95,16 +106,25 @@ const wordCond = ` AND (instr(ksb_fold(concat_ws(' ', lb.title, lb.authors, lb.s
 	OR EXISTS (SELECT 1 FROM library_files f WHERE f.book_id = lb.id
 		AND instr(ksb_fold(iif(f.source_md5 IS NULL, f.path, substr(f.path, 34))), ?) > 0))`
 
-const bookSelect = `SELECT lb.id, lb.title, lb.authors, lb.series, lb.series_index, lb.language,
-	(SELECT m.cover FROM library_book_meta m WHERE m.book_id = lb.id) FROM library_books lb`
+const suggestedCond = `EXISTS (SELECT 1 FROM library_book_suggestions s WHERE s.book_id = lb.id AND s.state = 'found')`
+
+// bookSelect — запрос книг; отметка предложения читается только для администратора.
+func bookSelect(admin bool) string {
+	suggestion := "0"
+	if admin {
+		suggestion = suggestedCond
+	}
+	return `SELECT lb.id, lb.title, lb.authors, lb.series, lb.series_index, lb.language,
+	(SELECT m.cover FROM library_book_meta m WHERE m.book_id = lb.id), ` + suggestion + ` FROM library_books lb`
+}
 
 // Books возвращает страницу каталога от последней созданной книги к более ранним.
-// before — курсор (0 — с начала). Каждое слово q ищется подстрокой, порядок слов
-// не важен; пустой после нормализации q ничего не отбирает.
+// before — курсор (0 — с начала). Каждое слово f.Q ищется подстрокой, порядок слов
+// не важен; пустой после нормализации запрос ничего не отбирает.
 //
 // Ключ и курсор — id книги: его выдаёт единственный писатель, поэтому книга,
 // созданная во время листания, уходит выше курсора и повторно не приходит.
-func (s *Store) Books(ctx context.Context, q string, before int64, limit int) (BookPage, error) {
+func (s *Store) Books(ctx context.Context, f BookFilter, before int64, limit int) (BookPage, error) {
 	// Книги и их файлы — из одного снимка, иначе слияние между запросами оставит
 	// книгу без файлов.
 	tx, err := s.db.Read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
@@ -112,16 +132,22 @@ func (s *Store) Books(ctx context.Context, q string, before int64, limit int) (B
 		return BookPage{}, err
 	}
 	defer tx.Rollback()
-	return queryBookPage(ctx, tx, q, before, limit)
+	return queryBookPage(ctx, tx, f, before, limit)
 }
 
-func queryBookPage(ctx context.Context, tx *sql.Tx, q string, before int64, limit int) (BookPage, error) {
+func queryBookPage(ctx context.Context, tx *sql.Tx, f BookFilter, before int64, limit int) (BookPage, error) {
+	if f.Suggested && !f.Admin {
+		return BookPage{Items: []Book{}}, nil
+	}
 	if before <= 0 {
 		before = math.MaxInt64
 	}
-	query := bookSelect + ` WHERE lb.id < ?`
+	query := bookSelect(f.Admin) + ` WHERE lb.id < ?`
 	args := []any{before}
-	for _, word := range strings.Fields(meta.Fold(q)) {
+	if f.Suggested {
+		query += ` AND ` + suggestedCond
+	}
+	for _, word := range strings.Fields(meta.Fold(f.Q)) {
 		query += wordCond
 		args = append(args, word, word)
 	}
@@ -140,14 +166,14 @@ func queryBookPage(ctx context.Context, tx *sql.Tx, q string, before int64, limi
 }
 
 // Book возвращает книгу, её файлы и прогресс по ним пользователя userID;
-// несуществующая книга — ErrBookNotFound.
-func (s *Store) Book(ctx context.Context, id, userID int64) (BookDetail, error) {
+// несуществующая книга — ErrBookNotFound. admin — как у BookFilter.
+func (s *Store) Book(ctx context.Context, id, userID int64, admin bool) (BookDetail, error) {
 	tx, err := s.db.Read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
 		return BookDetail{}, err
 	}
 	defer tx.Rollback()
-	books, err := queryBooks(ctx, tx, bookSelect+` WHERE lb.id = ?`, id)
+	books, err := queryBooks(ctx, tx, bookSelect(admin)+` WHERE lb.id = ?`, id)
 	if err != nil {
 		return BookDetail{}, err
 	}
@@ -205,7 +231,7 @@ func (s *Store) Feed(ctx context.Context, q string, before int64, limit int) (Fe
 }
 
 func feedPage(ctx context.Context, tx *sql.Tx, q string, before int64, limit int) (FeedPage, error) {
-	page, err := queryBookPage(ctx, tx, q, before, limit)
+	page, err := queryBookPage(ctx, tx, BookFilter{Q: q}, before, limit)
 	if err != nil {
 		return FeedPage{}, err
 	}
@@ -264,7 +290,7 @@ func queryBooks(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]B
 			title, authors, series, language, cover sql.NullString
 			index                                   sql.NullFloat64
 		)
-		if err := rows.Scan(&b.ID, &title, &authors, &series, &index, &language, &cover); err != nil {
+		if err := rows.Scan(&b.ID, &title, &authors, &series, &index, &language, &cover, &b.MetadataSuggestion); err != nil {
 			return nil, err
 		}
 		b.Title, b.Authors, b.Series, b.Language = nullable(title), nullable(authors), nullable(series), nullable(language)

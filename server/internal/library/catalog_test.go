@@ -38,7 +38,7 @@ func (e *testEnv) book(name, title string, authors ...string) {
 
 func (e *testEnv) page(q string, before int64, limit int) BookPage {
 	e.t.Helper()
-	p, err := e.st.Books(e.ctx, q, before, limit)
+	p, err := e.st.Books(e.ctx, BookFilter{Q: q, Admin: true}, before, limit)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestBookDetail(t *testing.T) {
 	r.sync("bob", partial, 0.9)
 	id := e.bookOf("piknik.fb2")
 
-	d, err := e.st.Book(e.ctx, id, aliceID)
+	d, err := e.st.Book(e.ctx, id, aliceID, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,21 +213,21 @@ func TestBookDetail(t *testing.T) {
 
 	// Последний по времени из хешей файла — здесь CrossPoint с md5 имени.
 	r.sync("alice", byName, 0.5)
-	d, _ = e.st.Book(e.ctx, id, aliceID)
+	d, _ = e.st.Book(e.ctx, id, aliceID, false)
 	if p := d.Files[1].Progress; p == nil || p.Hash != byName || p.Percentage != 0.5 {
 		t.Fatalf("by name %+v", p)
 	}
 	r.sync("alice", partial, 1)
-	d, _ = e.st.Book(e.ctx, id, aliceID)
+	d, _ = e.st.Book(e.ctx, id, aliceID, false)
 	if p := d.Files[1].Progress; p == nil || p.Hash != partial || !p.Finished {
 		t.Fatalf("latest %+v", p)
 	}
 
-	d, _ = e.st.Book(e.ctx, id, bobID)
+	d, _ = e.st.Book(e.ctx, id, bobID, false)
 	if p := d.Files[1].Progress; p == nil || p.Percentage != 0.9 {
 		t.Fatalf("bob %+v", p)
 	}
-	if _, err := e.st.Book(e.ctx, 9999, aliceID); !errors.Is(err, ErrBookNotFound) {
+	if _, err := e.st.Book(e.ctx, 9999, aliceID, false); !errors.Is(err, ErrBookNotFound) {
 		t.Fatalf("missing book: %v", err)
 	}
 
@@ -242,7 +242,7 @@ func TestBookDetail(t *testing.T) {
 
 func (e *testEnv) detail(id int64) BookDetail {
 	e.t.Helper()
-	d, err := e.st.Book(e.ctx, id, 0)
+	d, err := e.st.Book(e.ctx, id, 0, true)
 	if err != nil {
 		e.t.Fatal(err)
 	}

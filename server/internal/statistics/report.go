@@ -163,13 +163,18 @@ type report struct {
 	books   map[int64]BookRef
 	pages   map[int64]int
 	records []record
+	// hashes — ключ книги по каждому её хешу: у книги библиотеки их бывает несколько.
+	hashes map[string]int64
 }
 
 // load читает снимок пользователя в одной read-транзакции.
 //
 // Ключ книги — document_id, у строки без хеша — минус её id: в KOReader строки
 // book уникальны по title, authors и md5, и после правки метаданных у хеша
-// бывает несколько строк, а это одна книга.
+// бывает несколько строк, а это одна книга. Хеши файлов одной книги библиотеки
+// (FB2 и EPUB, разные редакции) сводятся к наименьшему document_id: для KOReader
+// это разные документы, а читается одна книга. Страницы таких файлов нумеруются
+// каждая по своему файлу, поэтому «прочитано страниц» у сведённой книги примерное.
 func (s *Store) load(ctx context.Context, userID int64) (*report, error) {
 	tx, err := s.db.Read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -177,7 +182,7 @@ func (s *Store) load(ctx context.Context, userID int64) (*report, error) {
 	}
 	defer tx.Rollback()
 
-	rep := &report{books: map[int64]BookRef{}, pages: map[int64]int{}}
+	rep := &report{books: map[int64]BookRef{}, pages: map[int64]int{}, hashes: map[string]int64{}}
 	var asOf int64
 	err = tx.QueryRowContext(ctx, `SELECT modified_at FROM webdav_files WHERE user_id = ? AND name = ?`,
 		userID, FileStatistics).Scan(&asOf)
@@ -203,7 +208,8 @@ func (s *Store) load(ctx context.Context, userID int64) (*report, error) {
 		       CASE WHEN b.document_id IS NULL THEN nullif(b.pages, 0) ELSE (
 		           SELECT s.pages FROM stat_books s
 		           WHERE s.user_id = b.user_id AND s.document_id = b.document_id AND s.pages > 0
-		           ORDER BY s.last_open DESC, s.id DESC LIMIT 1) END
+		           ORDER BY s.last_open DESC, s.id DESC LIMIT 1) END,
+		       lb.id, coalesce(st.last_open, 0)
 		FROM stat_books b
 		LEFT JOIN documents d ON d.id = b.document_id
 		LEFT JOIN progress_current c ON c.user_id = b.user_id AND c.document_id = b.document_id
@@ -216,28 +222,50 @@ func (s *Store) load(ctx context.Context, userID int64) (*report, error) {
 			ORDER BY h.file_id LIMIT 1)
 		LEFT JOIN library_books lb ON lb.id = lf.book_id
 		LEFT JOIN library_book_meta lm ON lm.book_id = lb.id
-		WHERE b.user_id = ?`, userID)
+		WHERE b.user_id = ?
+		ORDER BY b.document_id, b.id`, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	keys := map[int64]int64{}
+	libKeys := map[int64]int64{}
+	// Название, хеш и число страниц сведённой книги — от хеша с прогрессом, иначе
+	// от открытого позже: с ним связана карточка книги.
+	type rank struct {
+		progress bool
+		lastOpen int64
+	}
+	ranks := map[int64]rank{}
 	for rows.Next() {
-		var id int64
-		var doc sql.NullInt64
+		var id, lastOpen int64
+		var doc, pages, lib sql.NullInt64
 		var hash, title, authors sql.NullString
-		var pages sql.NullInt64
 		var ref BookRef
-		if err := rows.Scan(&id, &doc, &hash, &title, &authors, &ref.HasProgress, &pages); err != nil {
+		if err := rows.Scan(&id, &doc, &hash, &title, &authors, &ref.HasProgress, &pages, &lib, &lastOpen); err != nil {
 			return nil, err
 		}
 		key := -id
 		if doc.Valid {
 			key = doc.Int64
+			if lib.Valid {
+				if k, ok := libKeys[lib.Int64]; ok {
+					key = k
+				} else {
+					libKeys[lib.Int64] = key
+				}
+			}
+			rep.hashes[hash.String] = key
 		}
 		keys[id] = key
+		r := rank{ref.HasProgress, lastOpen}
+		if old, ok := ranks[key]; ok && (old.progress && !r.progress || old.progress == r.progress && old.lastOpen >= r.lastOpen) {
+			continue
+		}
+		ranks[key] = r
 		ref.Title, ref.Authors, ref.Hash = optString(title), optString(authors), optString(hash)
 		rep.books[key] = ref
+		delete(rep.pages, key)
 		if pages.Valid {
 			rep.pages[key] = int(pages.Int64)
 		}
@@ -537,15 +565,10 @@ func (s *Store) Sessions(ctx context.Context, userID int64, document *string, af
 	return out, nil, nil
 }
 
-// key — ключ книги с хешем hash: у книги с хешем это document_id, все строки хеша
-// уже сведены к нему.
+// key — ключ книги с хешем hash.
 func (rep *report) key(hash string) (int64, bool) {
-	for k, ref := range rep.books {
-		if ref.Hash != nil && *ref.Hash == hash {
-			return k, true
-		}
-	}
-	return 0, false
+	k, ok := rep.hashes[hash]
+	return k, ok
 }
 
 // BookStats — статистика одной книги за всё время. Указатели — nil, когда величина

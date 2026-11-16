@@ -373,6 +373,31 @@ func TestSummaryPagesAndBooks(t *testing.T) {
 	}
 }
 
+// exec выполняет запрос на запись и возвращает id вставленной строки.
+func (e *env) exec(q string, args ...any) int64 {
+	e.t.Helper()
+	res, err := e.db.Write.ExecContext(ctx, q, args...)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	id, _ := res.LastInsertId()
+	return id
+}
+
+// libFile добавляет в книгу библиотеки book (0 — новая с названием title) файл с
+// хешем hash, как после скана. Возвращает id книги.
+func (e *env) libFile(book int64, hash, title string) int64 {
+	e.t.Helper()
+	e.exec(`INSERT INTO library_roots (id, name, path, created_at) VALUES (1, 'books', '/books', 0) ON CONFLICT DO NOTHING`)
+	if book == 0 {
+		book = e.exec(`INSERT INTO library_books (title, created_at) VALUES (?, 0)`, title)
+	}
+	file := e.exec(`INSERT INTO library_files (root_id, path, size, mtime_ns, format, partial_md5, book_id, indexed_at)
+		VALUES (1, ?, 1, 1, 'epub', ?, ?, 0)`, hash+".epub", hash, book)
+	e.exec(`INSERT INTO library_file_hashes (hash, file_id) VALUES (?, ?)`, hash, file)
+	return book
+}
+
 // Названия из библиотеки — как в списке книг: правка важнее прогресса и статистики,
 // метаданные файла — только если других нет.
 func TestSummaryTitlesFromLibrary(t *testing.T) {
@@ -384,27 +409,10 @@ func TestSummaryTitlesFromLibrary(t *testing.T) {
 		statBook(3, "", "untitled", 100, pageRec(1, 100, d4+2000, 100)),
 	})
 	e.withProgress(alice, "edited", "Progress title")
-	exec := func(q string, args ...any) int64 {
-		t.Helper()
-		res, err := e.db.Write.ExecContext(ctx, q, args...)
-		if err != nil {
-			t.Fatal(err)
-		}
-		id, _ := res.LastInsertId()
-		return id
-	}
-	exec(`INSERT INTO library_roots (id, name, path, created_at) VALUES (1, 'books', '/books', 0)`)
-	libFile := func(hash, title string) int64 {
-		book := exec(`INSERT INTO library_books (title, created_at) VALUES (?, 0)`, title)
-		file := exec(`INSERT INTO library_files (root_id, path, size, mtime_ns, format, partial_md5, book_id, indexed_at)
-			VALUES (1, ?, 1, 1, 'epub', ?, ?, 0)`, hash+".epub", hash, book)
-		exec(`INSERT INTO library_file_hashes (hash, file_id) VALUES (?, ?)`, hash, file)
-		return book
-	}
-	edited := libFile("edited", "File title")
-	exec(`INSERT INTO library_book_meta (book_id, title, authors, updated_at) VALUES (?, 'Перекрёстки Сумерек', 'Роберт Джордан', 0)`, edited)
-	libFile("plain", "File title")
-	libFile("untitled", "Lib title")
+	edited := e.libFile(0, "edited", "File title")
+	e.exec(`INSERT INTO library_book_meta (book_id, title, authors, updated_at) VALUES (?, 'Перекрёстки Сумерек', 'Роберт Джордан', 0)`, edited)
+	e.libFile(0, "plain", "File title")
+	e.libFile(0, "untitled", "Lib title")
 
 	got := map[string]BookTotal{}
 	for _, b := range e.summary(alice, PeriodWeek, "UTC", now).Books {
@@ -418,6 +426,41 @@ func TestSummaryTitlesFromLibrary(t *testing.T) {
 	}
 	if b := got["untitled"]; *b.Title != "Lib title" {
 		t.Errorf("untitled: %s", *b.Title)
+	}
+}
+
+// FB2 и EPUB одной книги библиотеки — разные хеши для KOReader, но одна книга в
+// статистике; карточка — от хеша с прогрессом.
+func TestLibraryBookFilesMerged(t *testing.T) {
+	e := newEnv(t)
+	d3, d4 := unix(2026, 11, 3, 10, 0), unix(2026, 11, 4, 10, 0)
+	alice := e.snapshot("alice", now, []statstest.Book{
+		statBook(1, "Перекрестки сумерек", "fb2", 1211, pageRec(1, 1211, d3, 600)),
+		statBook(2, "(КВ - 10) Перекрестки сумерек", "epub", 1232, pageRec(2, 1232, d4, 300)),
+		statBook(3, "Other", "other", 100, pageRec(1, 100, d4+1000, 60)),
+	})
+	e.withProgress(alice, "epub", "Progress title")
+	book := e.libFile(0, "fb2", "Перекрёстки Сумерек")
+	e.libFile(book, "epub", "")
+	e.libFile(0, "other", "Other")
+
+	s := e.summary(alice, PeriodWeek, "UTC", now)
+	if len(s.Books) != 2 {
+		t.Fatalf("books %+v", s.Books)
+	}
+	b := s.Books[0]
+	if *b.Hash != "epub" || !b.HasProgress || *b.Title != "Progress title" || b.Duration != 900 || b.Pages != 2 {
+		t.Errorf("merged %+v", b)
+	}
+	for _, hash := range []string{"fb2", "epub"} {
+		_, st, err := e.s.Book(ctx, alice, hash, 0.5, time.UTC)
+		if err != nil || st == nil || st.Duration != 900 || st.Sessions != 2 || *st.Pages != 1232 {
+			t.Errorf("%s: %+v %v", hash, st, err)
+		}
+		ses, _, err := e.s.Sessions(ctx, alice, &hash, nil, 10)
+		if err != nil || len(ses) != 2 {
+			t.Errorf("%s sessions: %+v %v", hash, ses, err)
+		}
 	}
 }
 

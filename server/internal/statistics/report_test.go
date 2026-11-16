@@ -373,6 +373,54 @@ func TestSummaryPagesAndBooks(t *testing.T) {
 	}
 }
 
+// Названия из библиотеки — как в списке книг: правка важнее прогресса и статистики,
+// метаданные файла — только если других нет.
+func TestSummaryTitlesFromLibrary(t *testing.T) {
+	e := newEnv(t)
+	d4 := unix(2026, 11, 4, 10, 0)
+	alice := e.snapshot("alice", now, []statstest.Book{
+		statBook(1, "(КВ - 10) Перекрестки сумерек", "edited", 100, pageRec(1, 100, d4, 300)),
+		statBook(2, "Stat title", "plain", 100, pageRec(1, 100, d4+1000, 200)),
+		statBook(3, "", "untitled", 100, pageRec(1, 100, d4+2000, 100)),
+	})
+	e.withProgress(alice, "edited", "Progress title")
+	exec := func(q string, args ...any) int64 {
+		t.Helper()
+		res, err := e.db.Write.ExecContext(ctx, q, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, _ := res.LastInsertId()
+		return id
+	}
+	exec(`INSERT INTO library_roots (id, name, path, created_at) VALUES (1, 'books', '/books', 0)`)
+	libFile := func(hash, title string) int64 {
+		book := exec(`INSERT INTO library_books (title, created_at) VALUES (?, 0)`, title)
+		file := exec(`INSERT INTO library_files (root_id, path, size, mtime_ns, format, partial_md5, book_id, indexed_at)
+			VALUES (1, ?, 1, 1, 'epub', ?, ?, 0)`, hash+".epub", hash, book)
+		exec(`INSERT INTO library_file_hashes (hash, file_id) VALUES (?, ?)`, hash, file)
+		return book
+	}
+	edited := libFile("edited", "File title")
+	exec(`INSERT INTO library_book_meta (book_id, title, authors, updated_at) VALUES (?, 'Перекрёстки Сумерек', 'Роберт Джордан', 0)`, edited)
+	libFile("plain", "File title")
+	libFile("untitled", "Lib title")
+
+	got := map[string]BookTotal{}
+	for _, b := range e.summary(alice, PeriodWeek, "UTC", now).Books {
+		got[*b.Hash] = b
+	}
+	if b := got["edited"]; *b.Title != "Перекрёстки Сумерек" || *b.Authors != "Роберт Джордан" {
+		t.Errorf("edited: %s / %v", *b.Title, b.Authors)
+	}
+	if b := got["plain"]; *b.Title != "Stat title" {
+		t.Errorf("plain: %s", *b.Title)
+	}
+	if b := got["untitled"]; *b.Title != "Lib title" {
+		t.Errorf("untitled: %s", *b.Title)
+	}
+}
+
 func TestSummaryWithoutSnapshot(t *testing.T) {
 	e := newEnv(t)
 	alice := e.user("alice")

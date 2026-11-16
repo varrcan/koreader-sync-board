@@ -190,13 +190,15 @@ func (s *Store) load(ctx context.Context, userID int64) (*report, error) {
 		rep.asOf = &t
 	}
 
-	// Название — как в списке книг (statBook в progress/read.go): из прогресса, иначе
-	// из строки хеша с непустым названием и самым поздним last_open. Число страниц —
+	// Название — как в списке книг (metaColumns в progress/read.go): из правок книги
+	// библиотеки, затем из прогресса, из строки хеша с непустым названием и самым
+	// поздним last_open и из файла библиотеки. Число страниц —
 	// из строки хеша с самым поздним last_open среди строк с известным числом: при
 	// слиянии last_open строки обновляется из входящего снимка, а pages — нет.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT b.id, b.document_id, d.hash,
-		       coalesce(c.meta_title, nullif(st.title, '')), coalesce(c.meta_authors, st.authors),
+		       nullif(coalesce(lm.title, c.meta_title, nullif(st.title, ''), lb.title), ''),
+		       nullif(coalesce(lm.authors, c.meta_authors, st.authors, lb.authors), ''),
 		       c.user_id IS NOT NULL,
 		       CASE WHEN b.document_id IS NULL THEN nullif(b.pages, 0) ELSE (
 		           SELECT s.pages FROM stat_books s
@@ -209,6 +211,11 @@ func (s *Store) load(ctx context.Context, userID int64) (*report, error) {
 			SELECT s.id FROM stat_books s
 			WHERE s.user_id = b.user_id AND s.document_id = b.document_id AND s.title <> ''
 			ORDER BY s.last_open DESC, s.id DESC LIMIT 1) END
+		LEFT JOIN library_files lf ON lf.id = (
+			SELECT h.file_id FROM library_file_hashes h WHERE h.hash = d.hash
+			ORDER BY h.file_id LIMIT 1)
+		LEFT JOIN library_books lb ON lb.id = lf.book_id
+		LEFT JOIN library_book_meta lm ON lm.book_id = lb.id
 		WHERE b.user_id = ?`, userID)
 	if err != nil {
 		return nil, err
